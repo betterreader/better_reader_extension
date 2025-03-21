@@ -44,7 +44,8 @@ const App: React.FC = () => {
           theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'
         }`}>
         <span>BetterReader</span>
-        <ToggleButton />
+        {/*TODO: change this text into an icon*/}
+        <ToggleButton>Toggle Mode</ToggleButton>
       </header>
       <div
         className={`flex border-b ${theme === 'light' ? 'bg-gray-100 border-gray-200' : 'bg-[#1A1A1A] border-[#333]'}`}>
