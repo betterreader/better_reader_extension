@@ -11,12 +11,46 @@ export interface ArticleData {
   url: string;
 }
 
+// Define quiz interfaces here so they can be shared
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  answer?: number; // correct option index (old format)
+  correctAnswer?: number; // correct option index (new format)
+  explanation?: string;
+}
+
+export interface QuizData {
+  questions: QuizQuestion[];
+}
+
+export interface QuestionState {
+  answered: boolean;
+  selectedOption: number | null;
+  isCorrect: boolean | null;
+}
+
+export interface Message {
+  sender: 'bot' | 'user';
+  text: string;
+}
+
 const API_BASE_URL = 'http://localhost:5007';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'chat' | 'quiz'>('chat');
   const [articleData, setArticleData] = useState<ArticleData | null>(null);
   const theme = useStorage(exampleThemeStorage);
+
+  // Lift quiz state to parent component
+  const [quizMessages, setQuizMessages] = useState<Message[]>([
+    {
+      sender: 'bot',
+      text: 'I can generate quiz questions about this article. Try clicking "Generate Quiz" below!',
+    },
+  ]);
+  const [currentQuizData, setCurrentQuizData] = useState<QuizData | null>(null);
+  const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
 
   useEffect(() => {
     // Fetch article content from background script on mount
@@ -78,7 +112,19 @@ const App: React.FC = () => {
       </div>
       <div className="flex-1">
         {activeTab === 'chat' && <ChatTab articleData={articleData} apiBaseUrl={API_BASE_URL} theme={theme} />}
-        {activeTab === 'quiz' && <QuizTab articleData={articleData} apiBaseUrl={API_BASE_URL} theme={theme} />}
+        {activeTab === 'quiz' && (
+          <QuizTab
+            articleData={articleData}
+            apiBaseUrl={API_BASE_URL}
+            theme={theme}
+            quizMessages={quizMessages}
+            setQuizMessages={setQuizMessages}
+            currentQuizData={currentQuizData}
+            setCurrentQuizData={setCurrentQuizData}
+            questionStates={questionStates}
+            setQuestionStates={setQuestionStates}
+          />
+        )}
       </div>
     </div>
   );

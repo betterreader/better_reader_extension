@@ -1,49 +1,32 @@
 // src/components/QuizTab.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { ArticleData } from '../SidePanel';
+import { ArticleData, QuizData, QuizQuestion, QuestionState, Message } from '../SidePanel';
 
 interface QuizTabProps {
   articleData: ArticleData | null;
   apiBaseUrl: string;
   theme: 'light' | 'dark';
+  quizMessages: Message[];
+  setQuizMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  currentQuizData: QuizData | null;
+  setCurrentQuizData: React.Dispatch<React.SetStateAction<QuizData | null>>;
+  questionStates: QuestionState[];
+  setQuestionStates: React.Dispatch<React.SetStateAction<QuestionState[]>>;
 }
 
-interface QuizQuestion {
-  question: string;
-  options: string[];
-  answer?: number; // correct option index (old format)
-  correctAnswer?: number; // correct option index (new format)
-  explanation?: string;
-}
-
-interface QuizData {
-  questions: QuizQuestion[];
-}
-
-interface Message {
-  sender: 'bot' | 'user';
-  text: string;
-}
-
-// Add a new interface to track user answers and question state
-interface QuestionState {
-  answered: boolean;
-  selectedOption: number | null;
-  isCorrect: boolean | null;
-}
-
-const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => {
-  const [quizMessages, setQuizMessages] = useState<Message[]>([
-    {
-      sender: 'bot',
-      text: 'I can generate quiz questions about this article. Try clicking "Generate Quiz" below!',
-    },
-  ]);
-  const [currentQuizData, setCurrentQuizData] = useState<QuizData | null>(null);
+const QuizTab: React.FC<QuizTabProps> = ({
+  articleData,
+  apiBaseUrl,
+  theme,
+  quizMessages,
+  setQuizMessages,
+  currentQuizData,
+  setCurrentQuizData,
+  questionStates,
+  setQuestionStates,
+}) => {
   const [customPrompt, setCustomPrompt] = useState('');
   const [showCustomPrompt, setShowCustomPrompt] = useState(false);
-  // Add state to track question answers
-  const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
   const quizContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -74,7 +57,7 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
         })),
       );
     }
-  }, [currentQuizData]);
+  }, [currentQuizData, setQuestionStates]);
 
   const generateQuiz = (prompt: string = '') => {
     // Append a loading message
