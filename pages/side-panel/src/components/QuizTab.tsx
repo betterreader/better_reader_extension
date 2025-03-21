@@ -183,7 +183,7 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={quizContainerRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-[calc(100vh-160px)]">
+      <div ref={quizContainerRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-[calc(100vh-220px)]">
         {quizMessages.map((msg, index) => (
           <div
             key={index}
@@ -254,7 +254,8 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
             </div>
           ))}
       </div>
-      <div className={`p-3 border-t ${theme === 'light' ? 'border-gray-200 bg-white' : 'border-[#333] bg-[#1E1E1E]'}`}>
+      <div
+        className={`p-3 border-t sticky bottom-0 ${theme === 'light' ? 'border-gray-200 bg-white' : 'border-[#333] bg-[#1E1E1E]'}`}>
         <div className="flex gap-2 mb-2">
           <button
             className="bg-[#0078D4] text-white py-2 px-4 rounded hover:bg-[#005A9E] transition-colors"
