@@ -46,6 +46,12 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
     scrollToBottom();
   }, [quizMessages]);
 
+  useEffect(() => {
+    if (currentQuizData) {
+      setTimeout(scrollToBottom, 100); // Add a small delay to ensure content is rendered
+    }
+  }, [currentQuizData]);
+
   const generateQuiz = (prompt: string = '') => {
     // Append a loading message
     setQuizMessages(prev => [...prev, { sender: 'bot', text: 'Generating quiz questions...' }]);
@@ -129,7 +135,7 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={quizContainerRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+      <div ref={quizContainerRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-[calc(100vh-160px)]">
         {quizMessages.map((msg, index) => (
           <div
             key={index}
