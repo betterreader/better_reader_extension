@@ -1,7 +1,7 @@
 {
-  "name": "chrome-extension-boilerplate-react-vite",
-  "version": "0.4.3",
-  "description": "chrome extension boilerplate",
+  "name": "better-reader-extension",
+  "version": "0.1",
+  "description": "Extension that helps you better understand the content you are reading.",
   "license": "MIT",
   "private": true,
   "sideEffects": false,
