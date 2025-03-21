@@ -11,7 +11,8 @@ interface QuizTabProps {
 interface QuizQuestion {
   question: string;
   options: string[];
-  answer: number; // correct option index
+  answer?: number; // correct option index (old format)
+  correctAnswer?: number; // correct option index (new format)
   explanation?: string;
 }
 
@@ -24,6 +25,13 @@ interface Message {
   text: string;
 }
 
+// Add a new interface to track user answers and question state
+interface QuestionState {
+  answered: boolean;
+  selectedOption: number | null;
+  isCorrect: boolean | null;
+}
+
 const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => {
   const [quizMessages, setQuizMessages] = useState<Message[]>([
     {
@@ -34,6 +42,8 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   const [currentQuizData, setCurrentQuizData] = useState<QuizData | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
   const [showCustomPrompt, setShowCustomPrompt] = useState(false);
+  // Add state to track question answers
+  const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
   const quizContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -49,6 +59,20 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   useEffect(() => {
     if (currentQuizData) {
       setTimeout(scrollToBottom, 100); // Add a small delay to ensure content is rendered
+    }
+  }, [currentQuizData]);
+
+  // Initialize question states when quiz data changes
+  useEffect(() => {
+    if (currentQuizData) {
+      // Initialize state for each question
+      setQuestionStates(
+        currentQuizData.questions.map(() => ({
+          answered: false,
+          selectedOption: null,
+          isCorrect: null,
+        })),
+      );
     }
   }, [currentQuizData]);
 
@@ -100,8 +124,22 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
           setQuizMessages(prev => [...prev, { sender: 'bot', text: `Error: ${data.error}` }]);
           return;
         }
-        setCurrentQuizData(data);
-        displayQuiz(data, prompt);
+
+        // Handle different API response formats (correctAnswer vs answer)
+        if (data.questions && data.questions.length > 0) {
+          // Map the API response to ensure consistent property names
+          const formattedData = {
+            questions: data.questions.map((q: QuizQuestion) => ({
+              ...q,
+              // Ensure we always have an 'answer' property
+              answer: q.correctAnswer !== undefined ? q.correctAnswer : q.answer,
+            })),
+          };
+          setCurrentQuizData(formattedData);
+          displayQuiz(formattedData, prompt);
+        } else {
+          setQuizMessages(prev => [...prev, { sender: 'bot', text: 'Error: Invalid quiz data format' }]);
+        }
       })
       .catch(error => {
         console.error('Error generating quiz:', error);
@@ -122,15 +160,25 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
   const handleOptionSelection = (questionIndex: number, optionIndex: number) => {
     if (!currentQuizData) return;
+
+    // If question is already answered, do nothing
+    if (questionStates[questionIndex].answered) return;
+
     const question = currentQuizData.questions[questionIndex];
-    let feedback = '';
-    if (optionIndex === question.answer) {
-      feedback = 'Correct!';
-    } else {
-      feedback = `Incorrect. The correct answer is: ${question.options[question.answer]}`;
-    }
-    // Append feedback message
-    setQuizMessages(prev => [...prev, { sender: 'bot', text: feedback }]);
+    // Use answer property (which is now guaranteed to exist)
+    const correctAnswerIndex = question.answer;
+    const isCorrect = optionIndex === correctAnswerIndex;
+
+    // Update question state
+    setQuestionStates(prev => {
+      const newStates = [...prev];
+      newStates[questionIndex] = {
+        answered: true,
+        selectedOption: optionIndex,
+        isCorrect: isCorrect,
+      };
+      return newStates;
+    });
   };
 
   return (
@@ -161,21 +209,46 @@ const QuizTab: React.FC<QuizTabProps> = ({ articleData, apiBaseUrl, theme }) => 
                   <div
                     key={oIndex}
                     className={`p-3 border rounded cursor-pointer transition-colors ${
-                      theme === 'light'
-                        ? 'border-gray-200 text-gray-700 hover:bg-gray-50'
-                        : 'border-[#404040] text-[#E0E0E0] hover:bg-[#404040]'
+                      questionStates[qIndex]?.answered && questionStates[qIndex]?.selectedOption === oIndex
+                        ? questionStates[qIndex]?.isCorrect
+                          ? theme === 'light'
+                            ? 'bg-green-100 border-green-500 text-green-800'
+                            : 'bg-green-900 border-green-500 text-green-100'
+                          : theme === 'light'
+                            ? 'bg-red-100 border-red-500 text-red-800'
+                            : 'bg-red-900 border-red-500 text-red-100'
+                        : questionStates[qIndex]?.answered && oIndex === question.answer
+                          ? theme === 'light'
+                            ? 'bg-green-100 border-green-500 text-green-800'
+                            : 'bg-green-900 border-green-500 text-green-100'
+                          : theme === 'light'
+                            ? 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                            : 'border-[#404040] text-[#E0E0E0] hover:bg-[#404040]'
                     }`}
                     onClick={() => handleOptionSelection(qIndex, oIndex)}>
                     {option}
                   </div>
                 ))}
               </div>
-              {question.explanation && (
+              {questionStates[qIndex]?.answered && (
                 <div
-                  className={`mt-3 p-3 border-l-4 border-[#0078D4] rounded text-sm ${
-                    theme === 'light' ? 'bg-blue-50 text-gray-700' : 'bg-[#1E1E1E] text-[#E0E0E0]'
+                  className={`mt-3 p-3 border-l-4 rounded text-sm ${
+                    questionStates[qIndex]?.isCorrect
+                      ? theme === 'light'
+                        ? 'border-green-500 bg-green-50 text-green-800'
+                        : 'border-green-500 bg-green-900/20 text-green-100'
+                      : theme === 'light'
+                        ? 'border-red-500 bg-red-50 text-red-800'
+                        : 'border-red-500 bg-red-900/20 text-red-100'
                   }`}>
-                  {question.explanation}
+                  {questionStates[qIndex]?.isCorrect
+                    ? 'Correct!'
+                    : `Incorrect. The correct answer is: ${question.options[question.answer || 0]}`}
+                  {question.explanation && (
+                    <div className="mt-2">
+                      <strong>Explanation:</strong> {question.explanation}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
