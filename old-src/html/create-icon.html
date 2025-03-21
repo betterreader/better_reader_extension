@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Create Icon</title>
+</head>
+<body>
+  <canvas id="iconCanvas" width="128" height="128" style="border:1px solid #000;"></canvas>
+  <br>
+  <button id="downloadBtn">Download Icon</button>
+  
+  <script>
+    const canvas = document.getElementById('iconCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Fill background
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, 128, 128);
+    
+    // Draw a fancy "BR" for BetterReader
+    ctx.fillStyle = 'black';
+    ctx.font = 'bold 72px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('BR', 64, 64);
+    
+    // Add a circle around it
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(64, 64, 50, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Download button
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = 'icon.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+  </script>
+</body>
+</html>

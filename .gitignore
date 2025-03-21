@@ -24,3 +24,6 @@ tsconfig.tsbuildinfo
 
 # compiled
 **/tailwind-output.css
+
+## Python 
+__pycache__/

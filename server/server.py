@@ -4,14 +4,20 @@ import json
 import os
 from flask_cors import CORS
 import time
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 # Enable CORS for all routes with more specific configuration
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Gemini API configuration
-GEMINI_MODEL = 'gemini-1.5-flash'
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+PORT = int(os.getenv('PORT', 5007))
 
 @app.route('/api/test', methods=['GET'])
 def test():
@@ -500,5 +506,5 @@ def generate_image():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    print(f"Starting server on port 5007...")
-    app.run(debug=True, host='0.0.0.0', port=5007)
+    print(f"Starting server on port {PORT}...")
+    app.run(debug=True, host='0.0.0.0', port=PORT)

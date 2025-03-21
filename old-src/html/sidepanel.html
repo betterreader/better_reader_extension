@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BetterReader</title>
+  <style>
+    /* =====================
+       Variables
+       ===================== */
+    :root {
+      --background-color: #1E1E1E;
+      --text-color: #D4D4D4;
+      --secondary-text-color: #A0A0A0;
+      --highlight-color: #0078D4;
+      --border-color: #333;
+      --input-bg: #252526;
+      --input-border: #3C3C3C;
+      --button-bg: #0078D4;
+      --button-hover-bg: #005A9E;
+      --tab-active-bg: #252526;
+      --shadow-light: rgba(0, 0, 0, 0.3);
+      --correct: #4caf50;
+      --incorrect: #f44336;
+    }
+
+    /* =====================
+       Global Styles
+       ===================== */
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background-color: var(--background-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* =====================
+       Container & Header
+       ===================== */
+    .app-container {
+      width: 640px;
+      border-radius: 16px 16px 0 0;
+      overflow: hidden;
+    }
+
+    .header {
+      font-size: 2rem;
+      font-weight: 800;
+      padding: 24px 32px;
+      background: #1A1A1A;
+      color: #FFFFFF;
+    }
+
+    /* =====================
+       Tabs
+       ===================== */
+    .tabs {
+      display: flex;
+      background: #1A1A1A;
+      border-bottom: 1px solid #333;
+    }
+
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 16px 0;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #888;
+      cursor: pointer;
+      transition: color .15s;
+    }
+
+    .tab.active {
+      color: #FFF;
+      border-bottom: 3px solid #297FFF;
+    }
+
+    .tab:not(.active):hover {
+      color: #CCC;
+    }
+
+    /* =====================
+       Tab Content
+       ===================== */
+    .tab-content {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      height: calc(100vh - 120px); 
+      overflow: hidden;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    /* =====================
+       Chat Interface
+       ===================== */
+    .message-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      padding: 12px 16px;
+      border-radius: 8px;
+      max-width: 80%;
+      word-wrap: break-word;
+      line-height: 1.5;
+      box-shadow: 0 1px 2px var(--shadow-light);
+    }
+
+    .bot-message {
+      align-self: flex-start;
+      background-color: var(--input-bg);
+      border-bottom-left-radius: 2px;
+    }
+
+    .user-message {
+      align-self: flex-end;
+      background-color: var(--highlight-color);
+      color: white;
+      border-bottom-right-radius: 2px;
+    }
+
+    .typing-indicator {
+      opacity: 0.7;
+    }
+
+    .input-container {
+      display: flex;
+      padding: 12px;
+      background-color: var(--background-color);
+      border-top: 1px solid var(--border-color);
+    }
+
+    .message-input {
+      flex: 1;
+      padding: 12px;
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      background-color: var(--input-bg);
+      color: var(--text-color);
+      resize: none;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .message-input:focus {
+      border-color: var(--highlight-color);
+    }
+
+    .send-button {
+      background-color: var(--button-bg);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 40px;
+      height: 40px;
+      margin-left: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+
+    .send-button:hover {
+      background-color: var(--button-hover-bg);
+    }
+
+    /* =====================
+       Quiz Interface
+       ===================== */
+    .quiz-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+      height: 100%;
+    }
+    
+    .quiz-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    
+    .quiz-title {
+      font-size: 18px;
+      font-weight: 500;
+    }
+    
+    .quiz-content {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .quiz-footer {
+      padding: 12px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--background-color);
+      margin-top: auto;
+    }
+    
+    .quiz-button {
+      background: var(--button-bg);
+      border: none;
+      color: white;
+      padding: 10px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background-color 0.2s;
+    }
+    
+    .quiz-button:hover {
+      background: var(--button-hover-bg);
+    }
+    
+    .quiz-button.secondary {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-color);
+    }
+    
+    .quiz-button.secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    
+    .quiz-controls {
+      display: flex;
+      gap: 10px;
+    }
+    
+    .quiz-prompt-container {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .quiz-prompt-container.active {
+      display: flex;
+    }
+    
+    .quiz-prompt-input {
+      padding: 10px;
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      background-color: var(--input-bg);
+      color: var(--text-color);
+      font-family: inherit;
+      font-size: 14px;
+    }
+    
+    .quiz-question {
+      background: var(--input-bg);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px var(--shadow-light);
+    }
+    
+    .quiz-question-text {
+      font-size: 16px;
+      font-weight: 500;
+      margin-bottom: 12px;
+    }
+    
+    .quiz-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .quiz-option {
+      padding: 10px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .quiz-option:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    
+    .quiz-option.selected {
+      border-color: var(--highlight-color);
+    }
+    
+    .quiz-option.correct {
+      background-color: rgba(76, 175, 80, 0.2);
+      border-color: var(--correct);
+    }
+    
+    .quiz-option.incorrect {
+      background-color: rgba(244, 67, 54, 0.2);
+      border-color: var(--incorrect);
+    }
+    
+    .quiz-explanation {
+      margin-top: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.2);
+      border-left: 3px solid var(--highlight-color);
+      border-radius: 0 4px 4px 0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <!-- App Container -->
+  <div class="app-container">
+    <!-- Header -->
+    <div class="header">
+      BetterReader
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <div class="tab active" data-tab="chat">Chat</div>
+      <div class="tab" data-tab="quiz">Quiz</div>
+    </div>
+
+    <!-- Chat Tab -->
+    <div class="tab-content active" id="chat-tab">
+      <div class="message-container" id="chat-messages">
+        <div class="message bot-message">
+          Hi there! I can help you understand this article better. Ask me anything about it.
+        </div>
+      </div>
+      <div class="input-container">
+        <textarea class="message-input" id="message-input" placeholder="Type your message..."></textarea>
+        <button class="send-button" id="send-button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quiz Tab -->
+    <div class="tab-content" id="quiz-tab">
+      <div class="quiz-container" id="quiz-container">
+        <!-- Quiz Header -->
+        <div class="quiz-header">
+          <div class="quiz-title">Quiz</div>
+        </div>
+        
+        <!-- Quiz Content -->
+        <div class="quiz-content">
+          <div id="quiz-chat-container" class="message-container">
+            <div id="quiz-chat-messages">
+              <div class="message bot-message">
+                I can generate quiz questions about this article. Try clicking "Generate Quiz" below!
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Quiz Footer -->
+        <div class="quiz-footer">
+          <div class="quiz-controls">
+            <button class="quiz-button primary" id="generate-quiz-btn">Generate Quiz</button>
+            <button class="quiz-button secondary" id="custom-quiz-btn">Custom Quiz</button>
+          </div>
+          
+          <div class="quiz-prompt-container" id="custom-quiz-prompt">
+            <input type="text" class="quiz-prompt-input" id="quiz-prompt-input" placeholder="Enter a custom prompt for quiz generation (e.g., 'Create questions about the main characters')">
+            <button class="quiz-button primary" id="submit-prompt-btn">Generate</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/sidepanel.js"></script>
+</body>
+</html>
