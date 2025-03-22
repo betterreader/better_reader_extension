@@ -55,18 +55,48 @@ const App: React.FC = () => {
   const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
 
   useEffect(() => {
-    // Fetch article content from background script on mount
-    chrome.runtime.sendMessage({ action: 'getArticleContent' }, (response: any) => {
-      if (response && response.content) {
-        setArticleData({
-          content: response.content,
-          title: response.title,
-          url: response.url,
-        });
-      } else {
-        console.error('Failed to get article content:', response?.error);
+    const resetAllStates = () => {
+      // Reset quiz states
+      setQuizMessages([
+        {
+          sender: 'bot',
+          text: 'I can generate quiz questions about this article. Try clicking "Generate Quiz" below!',
+        },
+      ]);
+      setCurrentQuizData(null);
+      setQuestionStates([]);
+
+      // Reset active tab to chat
+      setActiveTab('chat');
+    };
+
+    const fetchArticleContent = () => {
+      chrome.runtime.sendMessage({ action: 'getArticleContent' }, (response: any) => {
+        if (response && response.content) {
+          setArticleData({
+            content: response.content,
+            title: response.title,
+            url: response.url,
+          });
+        } else {
+          console.error('Failed to get article content:', response?.error);
+          setArticleData(null);
+        }
+        // Reset all states when new content is fetched
+        resetAllStates();
+      });
+    };
+
+    // Fetch initial content
+    fetchArticleContent();
+
+    // Listen for tab updates to fetch new content
+    const tabUpdateListener = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+      if (changeInfo.status === 'complete') {
+        fetchArticleContent();
       }
-    });
+    };
+    chrome.tabs.onUpdated.addListener(tabUpdateListener);
 
     // Listen for messages from background script to switch to chat tab
     // when text is selected for explanation
@@ -87,9 +117,10 @@ const App: React.FC = () => {
       }
     });
 
-    // Clean up listener on unmount
+    // Clean up listeners on unmount
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.tabs.onUpdated.removeListener(tabUpdateListener);
     };
   }, []);
 
@@ -100,12 +131,14 @@ const App: React.FC = () => {
         theme === 'light' ? 'bg-white' : 'bg-[#1E1E1E]'
       }`}>
       <header
-        className={`text-2xl font-extrabold p-6 flex justify-between items-center ${
-          theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'
-        }`}>
-        <span>BetterReader</span>
-        {/*TODO: change this text into an icon*/}
-        <ToggleButton>{theme === 'dark' ? '🌙' : '☀️'}</ToggleButton>
+        className={`flex flex-col p-4 ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'}`}>
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-2xl font-extrabold">BetterReader</span>
+          <ToggleButton>{theme === 'dark' ? '🌙' : '☀️'}</ToggleButton>
+        </div>
+        <div className={`text-base font-medium truncate ${theme === 'light' ? 'text-gray-600' : 'text-gray-300'}`}>
+          {articleData?.title || 'Article Not Found'}
+        </div>
       </header>
       <div
         className={`flex border-b ${theme === 'light' ? 'bg-gray-100 border-gray-200' : 'bg-[#1A1A1A] border-[#333]'}`}>
@@ -163,9 +196,17 @@ const App: React.FC = () => {
         </div>
       </div>
       <div className="flex-1">
-        {activeTab === 'chat' && <ChatTab articleData={articleData} apiBaseUrl={API_BASE_URL} theme={theme} />}
-        {activeTab === 'quiz' && (
+        <div className={`h-full ${activeTab !== 'chat' ? 'hidden' : ''}`}>
+          <ChatTab
+            key={articleData?.url || 'no-article'}
+            articleData={articleData}
+            apiBaseUrl={API_BASE_URL}
+            theme={theme}
+          />
+        </div>
+        <div className={`h-full ${activeTab !== 'quiz' ? 'hidden' : ''}`}>
           <QuizTab
+            key={articleData?.url || 'no-article'}
             articleData={articleData}
             apiBaseUrl={API_BASE_URL}
             theme={theme}
@@ -176,9 +217,18 @@ const App: React.FC = () => {
             questionStates={questionStates}
             setQuestionStates={setQuestionStates}
           />
-        )}
-        {activeTab === 'notes' && <NotesTab theme={theme} />}
-        {activeTab === 'research' && <ResearchTab articleData={articleData} apiBaseUrl={API_BASE_URL} theme={theme} />}
+        </div>
+        <div className={`h-full ${activeTab !== 'notes' ? 'hidden' : ''}`}>
+          <NotesTab key={articleData?.url || 'no-article'} theme={theme} />
+        </div>
+        <div className={`h-full ${activeTab !== 'research' ? 'hidden' : ''}`}>
+          <ResearchTab
+            key={articleData?.url || 'no-article'}
+            articleData={articleData}
+            apiBaseUrl={API_BASE_URL}
+            theme={theme}
+          />
+        </div>
       </div>
     </div>
   );
