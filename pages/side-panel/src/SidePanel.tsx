@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ChatTab from '@src/components/ChatTab';
 import QuizTab from '@src/components/QuizTab';
 import NotesTab from '@src/components/NotesTab';
+import ResearchTab from '@src/components/ResearchTab';
 import { ToggleButton } from '@extension/ui';
 import { exampleThemeStorage } from '@extension/storage';
 import { useStorage } from '@extension/shared';
@@ -39,7 +40,7 @@ export interface Message {
 const API_BASE_URL = 'http://localhost:5007';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'quiz' | 'notes'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'quiz' | 'notes' | 'research'>('chat');
   const [articleData, setArticleData] = useState<ArticleData | null>(null);
   const theme = useStorage(exampleThemeStorage);
 
@@ -123,6 +124,19 @@ const App: React.FC = () => {
           onClick={() => setActiveTab('notes')}>
           Notes
         </div>
+        <div
+          className={`flex-1 text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+            activeTab === 'research'
+              ? theme === 'light'
+                ? 'text-gray-900 border-b-4 border-blue-500'
+                : 'text-white border-b-4 border-[#297FFF]'
+              : theme === 'light'
+                ? 'text-gray-600 hover:text-gray-900'
+                : 'text-gray-500 hover:text-gray-300'
+          }`}
+          onClick={() => setActiveTab('research')}>
+          Research
+        </div>
       </div>
       <div className="flex-1">
         {activeTab === 'chat' && <ChatTab articleData={articleData} apiBaseUrl={API_BASE_URL} theme={theme} />}
@@ -140,6 +154,7 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'notes' && <NotesTab theme={theme} />}
+        {activeTab === 'research' && <ResearchTab articleData={articleData} apiBaseUrl={API_BASE_URL} theme={theme} />}
       </div>
     </div>
   );

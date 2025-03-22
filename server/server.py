@@ -13,11 +13,18 @@ app = Flask(__name__)
 # Enable CORS for all routes with more specific configuration
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# Gemini API configuration
+# API configuration
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+PERPLEXITY_API_KEY = os.getenv('PERPLEXITY_API_KEY')
 PORT = int(os.getenv('PORT', 5007))
+
+# Perplexity API configuration
+PERPLEXITY_HEADERS = {
+    "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+    "Content-Type": "application/json"
+}
 
 @app.route('/api/test', methods=['GET'])
 def test():
@@ -504,6 +511,108 @@ def generate_image():
     except Exception as e:
         print(f"Error generating image: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/research', methods=['POST'])
+def research():
+    print("Received research request")
+    data = request.get_json()
+
+    if not data or 'articleContent' not in data:
+        return jsonify({'error': 'Missing article content'}), 400
+
+    article_content = data['articleContent']
+    article_title = data.get('articleTitle', '')
+    research_query = data.get('researchQuery', '')
+
+    try:
+        # Create a query based on the article content, title, and user's research query
+        query = (
+            f"Research Query: {research_query}\n"
+            f"Based on this article titled '{article_title}', "
+            f"which is about: {article_content[:500]}...\n"
+            "Find 5 articles that specifically address the research query while relating to the main article's content."
+        )
+
+        print(f"Sending request to Perplexity API for article: {article_title}")
+        
+        # Call Perplexity API with increased timeout
+        response = requests.post(
+            "https://api.perplexity.ai/chat/completions",
+            headers=PERPLEXITY_HEADERS,
+            json={
+                "model": "sonar",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": """You are a research assistant. Your task is to find related articles.
+                        IMPORTANT: You must respond with properly formatted JSON only, no other text.
+                        Format: {"results": [{"title": "Article Title", "url": "https://article-url.com", "snippet": "Brief description"}]}
+                        Rules:
+                        - Return exactly 5 results
+                        - Ensure URLs are real and accessible
+                        - Keep snippets under 200 characters
+                        - Articles must be closely related to the topic
+                        - No markdown, just pure JSON"""
+                    },
+                    {
+                        "role": "user",
+                        "content": query
+                    }
+                ]
+            },
+            timeout=30  # increased timeout
+        )
+
+        print(f"Perplexity API Status Code: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"Perplexity API error: {response.text}")
+            return jsonify({'error': 'Failed to fetch research results'}), 500
+
+        response_data = response.json()
+        print(f"Raw API Response: {json.dumps(response_data, indent=2)}")
+        
+        if not response_data.get('choices') or not isinstance(response_data['choices'], list):
+            print("Invalid response structure - missing or invalid choices")
+            return jsonify({'error': 'Invalid API response structure'}), 500
+
+        content = response_data['choices'][0].get('message', {}).get('content', '').strip()
+        print(f"Content to parse: {content}")
+        
+        if not content:
+            print("Empty content received from API")
+            return jsonify({'error': 'Empty research results received'}), 500
+
+        try:
+            # Handle potential markdown code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+            
+            # Parse the JSON string into a Python dictionary
+            results = json.loads(content)
+            
+            # Validate results structure
+            if not isinstance(results, dict) or 'results' not in results:
+                print("Invalid results structure")
+                return jsonify({'error': 'Invalid results format'}), 500
+                
+            print("Successfully parsed research results")
+            return jsonify(results)
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {str(e)}")
+            print(f"Failed content: {content}")
+            return jsonify({'error': 'Failed to parse research results'}), 500
+
+    except requests.Timeout:
+        print("Perplexity API request timed out")
+        return jsonify({'error': 'The research request timed out. Please try again.'}), 504
+    except Exception as e:
+        print(f"Exception in research endpoint: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 
 if __name__ == '__main__':
     print(f"Starting server on port {PORT}...")
