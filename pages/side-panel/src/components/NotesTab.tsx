@@ -40,7 +40,6 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
   };
 
   useEffect(() => {
-    // Get current tab URL and load initial highlights
     chrome.tabs.query({ active: true, currentWindow: true }, async tabs => {
       if (tabs[0]?.url) {
         setCurrentUrl(tabs[0].url);
@@ -48,15 +47,12 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
       }
     });
 
-    // Listen for storage changes
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      // Only update if the change is for the current URL
       if (changes[currentUrl]) {
         loadHighlights(currentUrl);
       }
     };
 
-    // Listen for new highlight events from the content script
     const handleNewHighlight = () => {
       if (currentUrl) {
         loadHighlights(currentUrl);
@@ -77,7 +73,6 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
     const pageData = result[currentUrl] || { highlights: {} };
 
     delete pageData.highlights[id];
-
     await chrome.storage.local.set({ [currentUrl]: pageData });
 
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
@@ -123,7 +118,10 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
   };
 
   return (
-    <div className={`h-full overflow-y-auto p-4 ${theme === 'light' ? 'bg-white' : 'bg-[#1E1E1E]'}`}>
+    <div
+      className={`h-full overflow-y-auto p-4 ${
+        theme === 'light' ? 'bg-white text-gray-900' : 'bg-[#1E1E1E] text-gray-100'
+      }`}>
       {highlights.length === 0 ? (
         <div className={`text-center py-8 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
           No highlights found on this page
@@ -133,9 +131,9 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
           {highlights.map(highlight => (
             <div
               key={highlight.id}
-              className={`p-4 rounded-lg ${
+              className={`p-4 rounded-lg transition-colors cursor-pointer ${
                 theme === 'light' ? 'bg-gray-50 hover:bg-gray-100' : 'bg-[#2D2D2D] hover:bg-[#3D3D3D]'
-              } transition-colors cursor-pointer`}
+              }`}
               onClick={() => scrollToHighlight(highlight)}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -155,15 +153,19 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
                   Delete
                 </button>
               </div>
+
               <p className={theme === 'light' ? 'text-gray-900' : 'text-gray-100'}>{highlight.text}</p>
+
               <div className="mt-2">
                 {editingCommentId === highlight.id ? (
                   <div className="mt-2" onClick={e => e.stopPropagation()}>
                     <textarea
                       value={commentText}
                       onChange={e => setCommentText(e.target.value)}
-                      className={`w-full p-2 rounded border ${
-                        theme === 'light' ? 'border-gray-300 bg-white' : 'border-gray-600 bg-[#1E1E1E]'
+                      className={`w-full p-2 rounded border resize-none ${
+                        theme === 'light'
+                          ? 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'
+                          : 'border-gray-600 bg-[#1E1E1E] text-gray-100 placeholder-gray-400'
                       }`}
                       rows={3}
                       placeholder="Add a comment..."
@@ -197,9 +199,13 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme }) => {
                       startEditing(highlight);
                     }}
                     className={`mt-2 p-2 rounded ${
-                      theme === 'light' ? 'bg-gray-100 hover:bg-gray-200' : 'bg-[#3D3D3D] hover:bg-[#4D4D4D]'
+                      theme === 'light'
+                        ? 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                        : 'bg-[#3D3D3D] text-gray-200 hover:bg-[#4D4D4D]'
                     } cursor-text`}>
-                    {highlight.comment || 'Add a comment...'}
+                    {highlight.comment || (
+                      <span className={theme === 'light' ? 'text-gray-500' : 'text-gray-400'}>Add a comment...</span>
+                    )}
                   </div>
                 )}
               </div>

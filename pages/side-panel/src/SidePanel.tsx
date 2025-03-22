@@ -80,7 +80,7 @@ const App: React.FC = () => {
         }`}>
         <span>BetterReader</span>
         {/*TODO: change this text into an icon*/}
-        <ToggleButton>Toggle Mode</ToggleButton>
+        <ToggleButton>{theme === 'dark' ? '🌙' : '☀️'}</ToggleButton>
       </header>
       <div
         className={`flex border-b ${theme === 'light' ? 'bg-gray-100 border-gray-200' : 'bg-[#1A1A1A] border-[#333]'}`}>
