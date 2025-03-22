@@ -22,64 +22,205 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   ]);
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastProcessedTextRef = useRef<string>('');
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Scroll to bottom when messages change
   useEffect(() => {
-    scrollToBottom();
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // Listen for selected text from context menu
   useEffect(() => {
-    // Check for stored selected text first (for when side panel is opened by context menu)
-    chrome.storage.local.get(['selectedTextForExplanation'], result => {
-      if (result.selectedTextForExplanation) {
-        const { text, timestamp } = result.selectedTextForExplanation;
-
-        // Only process if it's recent (within last 5 seconds)
-        const now = Date.now();
-        if (now - timestamp < 5000) {
-          // Clear the stored text to prevent duplicate processing
-          chrome.storage.local.remove(['selectedTextForExplanation']);
-
-          // Process the selected text
-          handleSelectedText(text);
-        }
-      }
-    });
-
-    // Listen for messages from background script
-    const messageListener = (message: any) => {
-      if (message.action === 'sendSelectedText' && message.text) {
-        handleSelectedText(message.text);
+    // Function to handle selected text from storage or messages
+    const processSelectedText = (text: string, paragraph: string = '', title: string = '', mode: string = 'simple') => {
+      if (text && text.trim()) {
+        handleSelectedText(text, paragraph, title, mode);
       }
     };
 
+    // Check for stored selected text first (for when side panel is opened by context menu)
+    const checkStoredText = () => {
+      chrome.storage.local.get(['selectedTextForExplanation'], result => {
+        if (result.selectedTextForExplanation) {
+          const { text, paragraph, title, mode, timestamp } = result.selectedTextForExplanation;
+
+          // Only process if it's recent (within last 10 seconds)
+          const now = Date.now();
+          if (now - timestamp < 10000) {
+            // Clear the stored text to prevent duplicate processing
+            chrome.storage.local.remove(['selectedTextForExplanation']);
+
+            // Process the selected text with context and mode
+            processSelectedText(text, paragraph, title, mode);
+          }
+        }
+      });
+    };
+
+    // Check immediately when component mounts
+    checkStoredText();
+
+    // Listen for messages from background script
+    const messageListener = (
+      message: any,
+      sender: chrome.runtime.MessageSender,
+      sendResponse: (response?: any) => void,
+    ) => {
+      console.log('Received message in ChatTab:', message);
+
+      if (message.action === 'sendSelectedText' && message.text) {
+        processSelectedText(message.text, message.paragraph, message.title, message.mode);
+        // Send a response to acknowledge receipt
+        sendResponse({ status: 'received' });
+        return true; // Indicates async response
+      }
+
+      // Return false for messages we don't handle
+      return false;
+    };
+
+    // Add the listener
     chrome.runtime.onMessage.addListener(messageListener);
 
-    // Clean up listener on unmount
+    // Set up a periodic check for new selected text (as a backup)
+    const intervalId = setInterval(checkStoredText, 1000);
+
+    // Clean up listener and interval on unmount
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
+      clearInterval(intervalId);
     };
   }, [articleData]); // Re-run when articleData changes
 
-  const handleSelectedText = (selectedText: string) => {
-    if (!selectedText.trim()) return;
+  const handleSelectedText = (
+    selectedText: string,
+    paragraph: string = '',
+    title: string = '',
+    mode: string = 'simple',
+  ) => {
+    // Check if this is the same text we just processed (to prevent duplicates)
+    const requestKey = `${selectedText}-${mode}`;
+    if (requestKey === lastProcessedTextRef.current) {
+      console.log('Preventing duplicate explanation request');
+      return;
+    }
 
-    const messageText = `Explain: ${selectedText}`;
+    // Update the last processed text
+    lastProcessedTextRef.current = requestKey;
+
+    // Format the message text
+    const messageText = `Explain (${mode}): ${selectedText}`;
     setInputValue(messageText);
 
-    // Automatically send the message
-    sendMessageWithText(messageText);
+    // Store the context information for the API request
+    const explanationContext = {
+      text: selectedText,
+      paragraph: paragraph,
+      title: title,
+      mode: mode,
+    };
+
+    // Automatically send the message with context
+    sendExplanationRequest(messageText, explanationContext);
+  };
+
+  const sendExplanationRequest = (text: string, explanationContext: any) => {
+    // Clear any existing messages with the same text to prevent duplicates
+    setMessages(prev => prev.filter(msg => msg.text !== text));
+
+    // Add user message
+    setMessages(prev => [...prev, { sender: 'user', text: text }]);
+    setInputValue('');
+
+    // Add typing indicator for bot
+    const typingMessage: Message = { sender: 'bot', text: '...' };
+    setMessages(prev => [...prev, typingMessage]);
+
+    if (!articleData) {
+      // Replace typing indicator with an error message
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = {
+          sender: 'bot',
+          text: "Sorry, I couldn't extract any content from this page.",
+        };
+        return newMessages;
+      });
+      return;
+    }
+
+    const requestData = {
+      message: text,
+      articleContent: articleData.content,
+      articleTitle: articleData.title || explanationContext.title,
+      articleUrl: articleData.url,
+      explanationContext: explanationContext,
+    };
+
+    fetch(`${apiBaseUrl}/api/explanation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData),
+    })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Network response was not ok: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          // Remove typing indicator (last message)
+          newMessages.pop();
+          if (data.response) {
+            newMessages.push({ sender: 'bot', text: data.response });
+          } else if (data.error) {
+            newMessages.push({ sender: 'bot', text: `Error: ${data.error}` });
+          }
+          return newMessages;
+        });
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          newMessages.pop();
+          newMessages.push({ sender: 'bot', text: 'Sorry, I encountered an error while processing your request.' });
+          return newMessages;
+        });
+      });
   };
 
   const sendMessage = () => {
     const trimmed = inputValue.trim();
     if (!trimmed) return;
 
-    sendMessageWithText(trimmed);
+    // Check if this is an explanation request
+    if (trimmed.startsWith('Explain (') && trimmed.includes('): ')) {
+      // Extract the explanation context from the message
+      const modeMatch = trimmed.match(/Explain \(([^)]+)\):/);
+      const mode = modeMatch ? modeMatch[1] : 'simple';
+      const text = trimmed.split('): ')[1];
+
+      // Create explanation context
+      const explanationContext = {
+        text: text,
+        paragraph: '',
+        title: articleData?.title || '',
+        mode: mode,
+      };
+
+      // Send as an explanation request
+      sendExplanationRequest(trimmed, explanationContext);
+    } else {
+      // Send as a regular chat message
+      sendMessageWithText(trimmed);
+    }
   };
 
   const sendMessageWithText = (text: string) => {
@@ -157,7 +298,9 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+      <div
+        className="flex-1 overflow-y-auto p-4 flex flex-col gap-3"
+        style={{ maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
         {messages.map((msg, index) => (
           <div
             key={index}
@@ -167,7 +310,12 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
                   ? 'self-start bg-gray-100 text-gray-800'
                   : 'self-start bg-[#252526] text-[#D4D4D4]'
                 : 'self-end bg-[#0078D4] text-white'
-            }`}>
+            }`}
+            style={{
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word',
+              whiteSpace: 'pre-wrap',
+            }}>
             {msg.text}
           </div>
         ))}

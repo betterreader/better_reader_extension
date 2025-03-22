@@ -505,6 +505,167 @@ def generate_image():
         print(f"Error generating image: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/explanation', methods=['POST'])
+def handle_explanation_request():
+    try:
+        data = request.json
+        
+        # Check if the request is using the new format with explanationContext
+        if 'explanationContext' in data:
+            explanation_context = data.get('explanationContext', {})
+            selected_text = explanation_context.get('text', '')
+            paragraph = explanation_context.get('paragraph', '')
+            article_title = explanation_context.get('title', '') or data.get('articleTitle', '')
+            mode = explanation_context.get('mode', 'simple').lower()
+        else:
+            # Fallback to direct parameters for backward compatibility
+            selected_text = data.get('text', '')
+            paragraph = data.get('paragraph', '')
+            article_title = data.get('title', '')
+            mode = data.get('mode', 'simple').lower()
+
+        # Validate input
+        if not selected_text:
+            return jsonify({'error': 'No text provided for explanation'}), 400
+
+        # Set instruction based on mode
+        if mode == 'simple':
+            instruction = "Provide a simple, concise explanation in plain language. Focus on clarity and brevity."
+        elif mode == 'detailed':
+            instruction = "Provide a detailed explanation with nuances and background information. Be comprehensive but clear."
+        elif mode == 'examples':
+            instruction = "Explain using concrete examples and analogies to illustrate the concept. Make it relatable."
+        else:
+            instruction = "Provide a simple, concise explanation in plain language."
+
+        # Create prompt for Gemini
+        base_prompt = f"""
+        You are an AI assistant helping a user understand text from an article. The user has selected a specific text and wants an explanation.
+        
+        Article Title: {article_title}
+        
+        Selected Text: "{selected_text}"
+        
+        Surrounding Paragraph: "{paragraph}"
+        
+        Explanation Mode: {mode}
+        
+        {instruction}
+        
+        IMPORTANT INSTRUCTIONS:
+        1. Respond directly with the explanation without prefacing it with phrases like "Here's a simple explanation" or "In simple terms".
+        2. DO NOT repeat or quote the original selected text verbatim in your explanation.
+        3. Provide a fresh explanation in your own words that helps the user understand the concept.
+        4. Focus only on explaining the concept, not repeating what was already said.
+        5. Keep your explanation concise and to the point.
+        """
+
+        # Add article content if available (limited to avoid token limits)
+        article_content = data.get('articleContent', '')
+        if article_content:
+            # Truncate to avoid token limits
+            truncated_content = article_content[:2000] + "..." if len(article_content) > 2000 else article_content
+            base_prompt += f"\n\nAdditional article context: {truncated_content}"
+
+        # Get response from Gemini
+        response_text = ""
+        max_retries = 2
+        retries = 0
+        
+        while retries <= max_retries:
+            try:
+                response = requests.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, data=json.dumps({
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": base_prompt
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "topP": 0.8,
+                        "topK": 40,
+                        "maxOutputTokens": 800,
+                    }
+                })).json()
+                
+                response_text = response['candidates'][0]['content']['parts'][0]['text']
+                
+                # Check if response is valid (not too short and not just repeating the input)
+                words = response_text.split()
+                if len(words) < 10:
+                    retries += 1
+                    print(f"Response too short, retrying ({retries}/{max_retries})")
+                    continue
+                    
+                # Check if response is mostly just repeating the selected text
+                if is_mostly_duplicate(response_text, selected_text):
+                    retries += 1
+                    print(f"Response too similar to input, retrying ({retries}/{max_retries})")
+                    # Strengthen the instruction
+                    base_prompt += "\n\nIMPORTANT: Your previous response was too similar to the original text. Please provide a completely fresh explanation without repeating the original text."
+                    continue
+                    
+                # Post-process the response to remove any duplicated content
+                response_text = post_process_explanation(response_text, selected_text)
+                
+                # If we got here, the response is valid
+                break
+                
+            except Exception as e:
+                print(f"Error generating explanation: {e}")
+                retries += 1
+                if retries > max_retries:
+                    return jsonify({'error': 'Failed to generate explanation after multiple attempts'}), 500
+        
+        if not response_text or retries > max_retries:
+            return jsonify({'error': 'Failed to generate a valid explanation'}), 500
+            
+        return jsonify({'response': response_text})
+        
+    except Exception as e:
+        print(f"Error in explanation request: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def is_mostly_duplicate(response, original_text):
+    """Check if the response is mostly just repeating the original text"""
+    # Convert to lowercase for comparison
+    response_lower = response.lower()
+    original_lower = original_text.lower()
+    
+    # If the original text is very short, be more lenient
+    if len(original_lower) < 20:
+        return False
+        
+    # Check if a significant portion of the original text appears verbatim in the response
+    chunks = [original_lower[i:i+10] for i in range(0, len(original_lower)-10, 5)]
+    matches = sum(1 for chunk in chunks if chunk in response_lower)
+    
+    # If more than 40% of chunks match, consider it too similar
+    return matches > len(chunks) * 0.4
+
+def post_process_explanation(response, original_text):
+    """Process the explanation to remove duplicated content from the original text"""
+    # If the response contains the entire original text verbatim, remove it
+    if original_text in response:
+        response = response.replace(original_text, "")
+    
+    # Check for large chunks of the original text (more than 10 words in sequence)
+    original_words = original_text.split()
+    if len(original_words) > 10:
+        for i in range(len(original_words) - 10):
+            chunk = " ".join(original_words[i:i+10])
+            if chunk in response:
+                response = response.replace(chunk, "")
+    
+    # Clean up any double spaces or newlines created by the removals
+    response = " ".join(response.split())
+    
+    return response
+
 if __name__ == '__main__':
     print(f"Starting server on port {PORT}...")
     app.run(debug=True, host='0.0.0.0', port=PORT)
