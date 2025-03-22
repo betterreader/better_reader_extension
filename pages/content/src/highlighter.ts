@@ -34,26 +34,30 @@ export function initHighlighter() {
     newPopup.style.left = `${x}px`;
     newPopup.style.top = `${y - 45}px`;
 
-    // Create container for color buttons
+    // Create horizontal container for color buttons and ELI5
+    const panelContainer = document.createElement('div');
+    panelContainer.style.display = 'flex';
+    panelContainer.style.flexDirection = 'row';
+    panelContainer.style.alignItems = 'center';
+    panelContainer.style.gap = '12px';
+
+    // Create color button row
     const colorContainer = document.createElement('div');
     colorContainer.className = 'highlight-color-container';
     colorContainer.style.display = 'flex';
-    colorContainer.style.marginBottom = '8px';
-    colorContainer.style.justifyContent = 'space-between';
+    colorContainer.style.gap = '10px';
 
     const colors = ['yellow', 'green', 'blue', 'pink'];
     colors.forEach(color => {
       const button = document.createElement('button');
       button.className = 'highlight-color-btn';
-      button.style.width = '24px';
-      button.style.height = '24px';
+      button.style.width = '28px';
+      button.style.height = '28px';
       button.style.borderRadius = '50%';
       button.style.border = '1px solid #ddd';
-      button.style.margin = '0 4px';
       button.style.cursor = 'pointer';
       button.style.backgroundColor = color;
 
-      // Use mousedown instead of click to ensure it fires before popup removal
       button.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
@@ -65,15 +69,9 @@ export function initHighlighter() {
       colorContainer.appendChild(button);
     });
 
-    newPopup.appendChild(colorContainer);
+    panelContainer.appendChild(colorContainer);
 
-    // Add a separator
-    const separator = document.createElement('div');
-    separator.style.borderTop = '1px solid #eee';
-    separator.style.margin = '4px 0';
-    newPopup.appendChild(separator);
-
-    // Add ELI5 button
+    // Add ELI5 button to the right
     const eli5Button = document.createElement('button');
     eli5Button.className = 'eli5-button';
     eli5Button.textContent = 'ELI5';
@@ -81,11 +79,10 @@ export function initHighlighter() {
     eli5Button.style.color = 'white';
     eli5Button.style.border = 'none';
     eli5Button.style.borderRadius = '4px';
-    eli5Button.style.padding = '4px 8px';
+    eli5Button.style.padding = '6px 12px';
     eli5Button.style.fontSize = '12px';
     eli5Button.style.fontWeight = 'bold';
     eli5Button.style.cursor = 'pointer';
-    eli5Button.style.width = '100%';
     eli5Button.style.textAlign = 'center';
 
     eli5Button.addEventListener('mousedown', e => {
@@ -93,11 +90,9 @@ export function initHighlighter() {
       e.stopPropagation();
       isClickingPopup = true;
 
-      // Get the current selection
       if (currentSelection && !currentSelection.isCollapsed) {
         const selectedText = currentSelection.toString();
 
-        // Send message to background script to trigger explanation with "examples" mode
         chrome.runtime.sendMessage({
           action: 'explainWithAI',
           text: selectedText,
@@ -105,21 +100,17 @@ export function initHighlighter() {
           source: 'eli5Button',
         });
 
-        // Open side panel
-        chrome.runtime.sendMessage({
-          action: 'openSidePanel',
-        });
+        chrome.runtime.sendMessage({ action: 'openSidePanel' });
       }
 
-      // Remove popup after clicking
       if (popup) {
         document.body.removeChild(popup);
         popup = null;
       }
     });
 
-    newPopup.appendChild(eli5Button);
-
+    panelContainer.appendChild(eli5Button);
+    newPopup.appendChild(panelContainer);
     document.body.appendChild(newPopup);
     popup = newPopup;
   }
@@ -142,7 +133,6 @@ export function initHighlighter() {
         text: range.toString(),
       });
 
-      // Create a serializable range object
       const rangeData = {
         startOffset: range.startOffset,
         endOffset: range.endOffset,
@@ -150,7 +140,6 @@ export function initHighlighter() {
         endContainer: range.endContainer,
       };
 
-      // Dispatch event for content-runtime to handle the actual highlighting
       const event = new CustomEvent<HighlightEvent>('HIGHLIGHT_TEXT', {
         bubbles: true,
         composed: true,
@@ -171,14 +160,12 @@ export function initHighlighter() {
       console.error('Failed to dispatch highlight event:', e);
     }
 
-    // Use setTimeout to ensure the event is dispatched before cleanup
     setTimeout(() => {
       if (popup) {
         document.body.removeChild(popup);
         popup = null;
       }
 
-      // Clear the selection
       if (currentSelection) {
         currentSelection.removeAllRanges();
         currentSelection = null;
@@ -188,13 +175,11 @@ export function initHighlighter() {
 
   // Handle text selection
   document.addEventListener('mouseup', e => {
-    // Reset clicking state
     if (isClickingPopup) {
       isClickingPopup = false;
       return;
     }
 
-    // Don't show popup if clicking on the popup itself
     if (popup && (e.target as Node).contains(popup)) {
       return;
     }
@@ -221,7 +206,6 @@ export function initHighlighter() {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
 
-      // Position popup above the selection
       const x = rect.left + rect.width / 2 - 50;
       const y = rect.top + window.scrollY;
 
@@ -232,19 +216,16 @@ export function initHighlighter() {
 
   // Clean up popup when clicking outside
   document.addEventListener('mousedown', e => {
-    // Don't remove popup if clicking on it
     if (popup && popup.contains(e.target as Node)) {
       return;
     }
 
-    // Only remove popup if we're not in the middle of a color selection
     if (popup && !isClickingPopup) {
       document.body.removeChild(popup);
       popup = null;
     }
   });
 
-  // Prevent text selection from being lost when moving mouse over popup
   document.addEventListener('mousemove', e => {
     if (popup && popup.contains(e.target as Node)) {
       e.preventDefault();

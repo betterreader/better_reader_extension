@@ -774,6 +774,103 @@ def research():
         print(f"Exception in research endpoint: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
+@app.route('/api/generate_summary', methods=['POST'])
+def generate_summary():
+    print("Received summary generation request")
+    try:
+        data = request.json
+        
+        if not data or 'content' not in data or 'options' not in data:
+            return jsonify({'error': 'Missing content or options'}), 400
+            
+        article_content = data['content']
+        options = data['options']
+        
+        # Create prompt based on selected options
+        prompt_parts = ["Based on the following article content, provide:"]
+        
+        if options['bulletPoints']['enabled']:
+            detail_level = "detailed" if options['bulletPoints']['detail'] == 'detailed' else "concise"
+            expertise_level = "expert" if options['bulletPoints']['level'] == 'expert' else "beginner"
+            prompt_parts.append(f"1. A {detail_level} bullet-point summary at {expertise_level} level")
+        
+        if options['definitions']:
+            prompt_parts.append("2. Key definitions from the article (term: definition format)")
+        
+        if options['topics']:
+            prompt_parts.append("3. Main topics covered in the article")
+        
+        if options['questions']:
+            prompt_parts.append("4. Thought-provoking questions for reflection")
+            
+        prompt = f"""
+        {' '.join(prompt_parts)}
+        
+        Article Content:
+        {article_content[:4000]}
+        
+        Format your response as a JSON object with these possible fields:
+        {{
+            "bulletPoints": ["point1", "point2", ...],
+            "definitions": [{{"term": "term1", "definition": "definition1"}}, ...],
+            "topics": ["topic1", "topic2", ...],
+            "questions": ["question1", "question2", ...]
+        }}
+        
+        Only include the fields that were requested in the options.
+        Ensure the response is properly formatted JSON.
+        """
+        
+        # Call Gemini API
+        response = requests.post(
+            GEMINI_API_URL,
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{
+                    "parts": [{
+                        "text": prompt
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.3,
+                    "topK": 40,
+                    "topP": 0.95,
+                    "maxOutputTokens": 1024
+                }
+            }
+        )
+        
+        if response.status_code != 200:
+            return jsonify({'error': 'Failed to generate summary'}), 500
+            
+        response_data = response.json()
+        
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
+            
+            # Extract JSON from the response
+            try:
+                # Handle potential markdown code blocks
+                if "```json" in generated_text:
+                    json_str = generated_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in generated_text:
+                    json_str = generated_text.split("```")[1].split("```")[0].strip()
+                else:
+                    json_str = generated_text
+                    
+                summary_data = json.loads(json_str)
+                return jsonify(summary_data)
+                
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {str(e)}")
+                return jsonify({'error': 'Failed to parse summary data'}), 500
+        else:
+            return jsonify({'error': 'No summary generated'}), 500
+            
+    except Exception as e:
+        print(f"Error generating summary: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print(f"Starting server on port {PORT}...")
     app.run(debug=True, host='0.0.0.0', port=PORT)

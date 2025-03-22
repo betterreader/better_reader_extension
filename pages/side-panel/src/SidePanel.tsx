@@ -3,6 +3,7 @@ import ChatTab from '@src/components/ChatTab';
 import QuizTab from '@src/components/QuizTab';
 import NotesTab from '@src/components/NotesTab';
 import ResearchTab from '@src/components/ResearchTab';
+import SummaryTab from '@src/components/SummaryTab';
 import { ToggleButton } from '@extension/ui';
 import { exampleThemeStorage } from '@extension/storage';
 import { useStorage } from '@extension/shared';
@@ -40,7 +41,7 @@ export interface Message {
 const API_BASE_URL = 'http://localhost:5007';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'quiz' | 'notes' | 'research'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'quiz' | 'notes' | 'research' | 'summary'>('chat');
   const [articleData, setArticleData] = useState<ArticleData | null>(null);
   const theme = useStorage(exampleThemeStorage);
 
@@ -134,16 +135,16 @@ const App: React.FC = () => {
         className={`flex flex-col p-4 ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'}`}>
         <div className="flex justify-between items-center mb-2">
           <span className="text-2xl font-extrabold">BetterReader</span>
-          <ToggleButton>{theme === 'dark' ? '🌙' : '☀️'}</ToggleButton>
+          <ToggleButton />
         </div>
         <div className={`text-base font-medium truncate ${theme === 'light' ? 'text-gray-600' : 'text-gray-300'}`}>
           {articleData?.title || 'Article Not Found'}
         </div>
       </header>
       <div
-        className={`flex border-b ${theme === 'light' ? 'bg-gray-100 border-gray-200' : 'bg-[#1A1A1A] border-[#333]'}`}>
+        className={`flex justify-between border-b px-4 ${theme === 'light' ? 'bg-gray-100 border-gray-200' : 'bg-[#1A1A1A] border-[#333]'}`}>
         <div
-          className={`flex-1 text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'chat'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -156,7 +157,20 @@ const App: React.FC = () => {
           Chat
         </div>
         <div
-          className={`flex-1 text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+            activeTab === 'summary'
+              ? theme === 'light'
+                ? 'text-gray-900 border-b-4 border-blue-500'
+                : 'text-white border-b-4 border-[#297FFF]'
+              : theme === 'light'
+                ? 'text-gray-600 hover:text-gray-900'
+                : 'text-gray-500 hover:text-gray-300'
+          }`}
+          onClick={() => setActiveTab('summary')}>
+          Summary
+        </div>
+        <div
+          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'quiz'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -169,7 +183,7 @@ const App: React.FC = () => {
           Quiz
         </div>
         <div
-          className={`flex-1 text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'notes'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -182,7 +196,7 @@ const App: React.FC = () => {
           Notes
         </div>
         <div
-          className={`flex-1 text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'research'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -223,6 +237,14 @@ const App: React.FC = () => {
         </div>
         <div className={`h-full ${activeTab !== 'research' ? 'hidden' : ''}`}>
           <ResearchTab
+            key={articleData?.url || 'no-article'}
+            articleData={articleData}
+            apiBaseUrl={API_BASE_URL}
+            theme={theme}
+          />
+        </div>
+        <div className={`h-full ${activeTab !== 'summary' ? 'hidden' : ''}`}>
+          <SummaryTab
             key={articleData?.url || 'no-article'}
             articleData={articleData}
             apiBaseUrl={API_BASE_URL}

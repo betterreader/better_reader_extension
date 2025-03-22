@@ -12,13 +12,12 @@ export const ToggleButton = ({ className, children, ...props }: ToggleButtonProp
     <button
       className={cn(
         className,
-        'py-1 px-4 rounded shadow hover:scale-105',
+        'rounded shadow hover:scale-105 text-2xl',
         theme === 'light' ? 'border-black' : 'border-white',
-        'mt-4 border-2 font-bold',
+        'border-2 font-bold',
       )}
-      onClick={exampleThemeStorage.toggle}
-      {...props}>
-      {children}
+      onClick={exampleThemeStorage.toggle}>
+      {theme === 'dark' ? '🌙' : '☀️'}
     </button>
   );
 };
