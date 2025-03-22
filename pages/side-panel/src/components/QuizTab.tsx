@@ -27,6 +27,9 @@ const QuizTab: React.FC<QuizTabProps> = ({
 }) => {
   const [customPrompt, setCustomPrompt] = useState('');
   const [showCustomPrompt, setShowCustomPrompt] = useState(false);
+  const [showLevelDialog, setShowLevelDialog] = useState(false);
+  const [selectedLevel, setSelectedLevel] = useState<string>('');
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');
   const quizContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -59,7 +62,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
     }
   }, [currentQuizData, setQuestionStates]);
 
-  const generateQuiz = (prompt: string = '') => {
+  const generateQuiz = (prompt: string = '', level: string = '') => {
     // Append a loading message
     setQuizMessages(prev => [...prev, { sender: 'bot', text: 'Generating quiz questions...' }]);
 
@@ -85,6 +88,10 @@ const QuizTab: React.FC<QuizTabProps> = ({
 
     if (prompt) {
       requestData.customPrompt = prompt;
+    }
+
+    if (level) {
+      requestData.userLevel = level;
     }
 
     fetch(`${apiBaseUrl}/api/generate-quiz`, {
@@ -119,7 +126,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
             })),
           };
           setCurrentQuizData(formattedData);
-          displayQuiz(formattedData, prompt);
+          displayQuiz(formattedData, prompt, level);
         } else {
           setQuizMessages(prev => [...prev, { sender: 'bot', text: 'Error: Invalid quiz data format' }]);
         }
@@ -134,10 +141,19 @@ const QuizTab: React.FC<QuizTabProps> = ({
       });
   };
 
-  const displayQuiz = (quizData: QuizData, prompt: string) => {
-    const introText = prompt
-      ? `Here are some quiz questions based on your request: "${prompt}"`
-      : 'Here are some quiz questions based on the article:';
+  const displayQuiz = (quizData: QuizData, prompt: string, level: string = '') => {
+    let introText = '';
+
+    if (prompt) {
+      introText = `Here are some quiz questions based on your request: "${prompt}"`;
+    } else {
+      introText = 'Here are some quiz questions based on the article:';
+    }
+
+    if (level) {
+      introText += ` (${level} level)`;
+    }
+
     setQuizMessages(prev => [...prev, { sender: 'bot', text: introText }]);
   };
 
@@ -162,6 +178,22 @@ const QuizTab: React.FC<QuizTabProps> = ({
       };
       return newStates;
     });
+  };
+
+  const handleGenerateQuizClick = (customPromptValue: string = '') => {
+    setPendingPrompt(customPromptValue);
+    setShowLevelDialog(true);
+  };
+
+  const handleLevelSelection = (level: string) => {
+    setSelectedLevel(level);
+    setShowLevelDialog(false);
+    generateQuiz(pendingPrompt, level);
+
+    if (pendingPrompt) {
+      setShowCustomPrompt(false);
+      setCustomPrompt('');
+    }
   };
 
   return (
@@ -237,12 +269,77 @@ const QuizTab: React.FC<QuizTabProps> = ({
             </div>
           ))}
       </div>
+
+      {/* Level Selection Dialog */}
+      {showLevelDialog && (
+        <div className={`fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50`}>
+          <div
+            className={`p-6 rounded-lg shadow-lg max-w-md w-full ${theme === 'light' ? 'bg-white' : 'bg-[#2D2D2D]'}`}>
+            <h3 className={`text-lg font-semibold mb-4 ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>
+              Select your level of understanding
+            </h3>
+            <p className={`mb-4 ${theme === 'light' ? 'text-gray-700' : 'text-gray-300'}`}>
+              This helps tailor the quiz questions to your knowledge level.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                className={`p-3 border rounded text-left transition-colors ${
+                  theme === 'light'
+                    ? 'border-gray-300 hover:bg-blue-50 hover:border-blue-300'
+                    : 'border-[#404040] hover:bg-[#0078D4]/20 hover:border-[#0078D4]'
+                }`}
+                onClick={() => handleLevelSelection('beginner')}>
+                <div className={`font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Beginner</div>
+                <div className={`text-sm ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
+                  I'm new to this topic and need basic questions
+                </div>
+              </button>
+              <button
+                className={`p-3 border rounded text-left transition-colors ${
+                  theme === 'light'
+                    ? 'border-gray-300 hover:bg-blue-50 hover:border-blue-300'
+                    : 'border-[#404040] hover:bg-[#0078D4]/20 hover:border-[#0078D4]'
+                }`}
+                onClick={() => handleLevelSelection('intermediate')}>
+                <div className={`font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Intermediate</div>
+                <div className={`text-sm ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
+                  I have some knowledge and want moderate difficulty
+                </div>
+              </button>
+              <button
+                className={`p-3 border rounded text-left transition-colors ${
+                  theme === 'light'
+                    ? 'border-gray-300 hover:bg-blue-50 hover:border-blue-300'
+                    : 'border-[#404040] hover:bg-[#0078D4]/20 hover:border-[#0078D4]'
+                }`}
+                onClick={() => handleLevelSelection('expert')}>
+                <div className={`font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Expert</div>
+                <div className={`text-sm ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
+                  I'm well-versed in this topic and want challenging questions
+                </div>
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                className={`py-2 px-4 rounded ${
+                  theme === 'light'
+                    ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    : 'bg-[#333] text-[#D4D4D4] hover:bg-[#444]'
+                }`}
+                onClick={() => setShowLevelDialog(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className={`p-3 border-t sticky bottom-0 ${theme === 'light' ? 'border-gray-200 bg-white' : 'border-[#333] bg-[#1E1E1E]'}`}>
         <div className="flex gap-2 mb-2">
           <button
             className="bg-[#0078D4] text-white py-2 px-4 rounded hover:bg-[#005A9E] transition-colors"
-            onClick={() => generateQuiz()}>
+            onClick={() => handleGenerateQuizClick()}>
             Generate Quiz
           </button>
           <button
@@ -269,18 +366,14 @@ const QuizTab: React.FC<QuizTabProps> = ({
               onChange={e => setCustomPrompt(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter') {
-                  generateQuiz(customPrompt);
-                  setShowCustomPrompt(false);
-                  setCustomPrompt('');
+                  handleGenerateQuizClick(customPrompt);
                 }
               }}
             />
             <button
               className="bg-[#0078D4] text-white py-2 px-4 rounded hover:bg-[#005A9E] transition-colors"
               onClick={() => {
-                generateQuiz(customPrompt);
-                setShowCustomPrompt(false);
-                setCustomPrompt('');
+                handleGenerateQuizClick(customPrompt);
               }}>
               Generate
             </button>

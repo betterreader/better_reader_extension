@@ -245,6 +245,7 @@ def generate_quiz():
         article_title = data.get('articleTitle', '')
         custom_prompt = data.get('customPrompt', '')
         client_timestamp = data.get('timestamp', '')
+        user_level = data.get('userLevel', '')
         
         # Add timestamp to encourage different questions each time
         import datetime
@@ -257,10 +258,41 @@ def generate_quiz():
         print(f"Processing quiz generation request for article '{article_title}'")
         print(f"Article content length: {len(article_content)}")
         print(f"Custom prompt: {custom_prompt}")
+        print(f"User level: {user_level}")
         print(f"Client timestamp: {client_timestamp}")
         print(f"Request time: {current_time}")
         print(f"Random seed: {random_seed}")
         print(f"Unique ID: {unique_id}")
+        
+        # Adjust difficulty based on user level
+        difficulty_instruction = ""
+        if user_level == 'beginner':
+            difficulty_instruction = """
+            Since the user is a BEGINNER in this topic:
+            - Focus on fundamental concepts and basic information from the article
+            - Use simple, clear language in both questions and answer choices
+            - Avoid complex terminology without explanation
+            - Include more straightforward questions that test basic understanding
+            - Make distractors (wrong answers) clearly distinguishable from correct answers
+            """
+        elif user_level == 'intermediate':
+            difficulty_instruction = """
+            Since the user has INTERMEDIATE knowledge of this topic:
+            - Balance between fundamental concepts and more nuanced details
+            - Include some questions that require connecting multiple concepts
+            - Use moderate domain-specific terminology where appropriate
+            - Create questions that test both recall and application of concepts
+            - Make distractors (wrong answers) plausible but distinguishable
+            """
+        elif user_level == 'expert':
+            difficulty_instruction = """
+            Since the user has EXPERT knowledge of this topic:
+            - Focus on nuanced details, advanced concepts, and deeper implications
+            - Include questions that require synthesis of multiple concepts
+            - Don't shy away from domain-specific terminology and advanced concepts
+            - Create challenging questions that test deep understanding and critical thinking
+            - Make distractors (wrong answers) sophisticated and plausible
+            """
         
         # Create prompt for quiz generation
         if custom_prompt:
@@ -273,12 +305,17 @@ def generate_quiz():
             USER REQUEST:
             {custom_prompt}
 
+            USER KNOWLEDGE LEVEL:
+            {user_level}
+
             CURRENT TIME: {current_time}
             UNIQUE ID: {unique_id}
             CLIENT TIMESTAMP: {client_timestamp}
 
             TASK:
-            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request.
+            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request and knowledge level.
+
+            {difficulty_instruction}
 
             INSTRUCTIONS:
             1. Analyze the user's request to understand what types of questions they want (e.g., about specific topics, concepts, or sections of the article).
@@ -322,12 +359,17 @@ def generate_quiz():
             USER REQUEST:
             Generate quiz questions about the main concepts and key points from this article.
 
+            USER KNOWLEDGE LEVEL:
+            {user_level}
+
             CURRENT TIME: {current_time}
             UNIQUE ID: {unique_id}
             CLIENT TIMESTAMP: {client_timestamp}
 
             TASK:
-            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request.
+            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request and knowledge level.
+
+            {difficulty_instruction}
 
             INSTRUCTIONS:
             1. Analyze the user's request to understand what types of questions they want (e.g., about specific topics, concepts, or sections of the article).
@@ -428,8 +470,6 @@ def generate_quiz():
     
     except Exception as e:
         print(f"Exception occurred in generate_quiz: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate-image', methods=['POST'])
