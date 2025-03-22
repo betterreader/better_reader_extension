@@ -31,12 +31,60 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
     scrollToBottom();
   }, [messages]);
 
+  // Listen for selected text from context menu
+  useEffect(() => {
+    // Check for stored selected text first (for when side panel is opened by context menu)
+    chrome.storage.local.get(['selectedTextForExplanation'], result => {
+      if (result.selectedTextForExplanation) {
+        const { text, timestamp } = result.selectedTextForExplanation;
+
+        // Only process if it's recent (within last 5 seconds)
+        const now = Date.now();
+        if (now - timestamp < 5000) {
+          // Clear the stored text to prevent duplicate processing
+          chrome.storage.local.remove(['selectedTextForExplanation']);
+
+          // Process the selected text
+          handleSelectedText(text);
+        }
+      }
+    });
+
+    // Listen for messages from background script
+    const messageListener = (message: any) => {
+      if (message.action === 'sendSelectedText' && message.text) {
+        handleSelectedText(message.text);
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(messageListener);
+
+    // Clean up listener on unmount
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+    };
+  }, [articleData]); // Re-run when articleData changes
+
+  const handleSelectedText = (selectedText: string) => {
+    if (!selectedText.trim()) return;
+
+    const messageText = `Explain: ${selectedText}`;
+    setInputValue(messageText);
+
+    // Automatically send the message
+    sendMessageWithText(messageText);
+  };
+
   const sendMessage = () => {
     const trimmed = inputValue.trim();
     if (!trimmed) return;
 
+    sendMessageWithText(trimmed);
+  };
+
+  const sendMessageWithText = (text: string) => {
     // Add user message
-    setMessages(prev => [...prev, { sender: 'user', text: trimmed }]);
+    setMessages(prev => [...prev, { sender: 'user', text: text }]);
     setInputValue('');
 
     // Add typing indicator for bot
@@ -57,7 +105,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
     }
 
     const requestData = {
-      message: trimmed,
+      message: text,
       articleContent: articleData.content,
       articleTitle: articleData.title,
       articleUrl: articleData.url,

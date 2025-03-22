@@ -66,6 +66,30 @@ const App: React.FC = () => {
         console.error('Failed to get article content:', response?.error);
       }
     });
+
+    // Listen for messages from background script to switch to chat tab
+    // when text is selected for explanation
+    const messageListener = (message: any) => {
+      if (message.action === 'sendSelectedText' && message.text) {
+        // Switch to chat tab when text is selected for explanation
+        setActiveTab('chat');
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(messageListener);
+
+    // Also check if there's stored selected text
+    chrome.storage.local.get(['selectedTextForExplanation'], result => {
+      if (result.selectedTextForExplanation) {
+        // Switch to chat tab if there's selected text waiting
+        setActiveTab('chat');
+      }
+    });
+
+    // Clean up listener on unmount
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+    };
   }, []);
 
   return (
