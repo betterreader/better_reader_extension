@@ -1,0 +1,15 @@
+@keyframes highlightFocus {
+  0% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 0, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 0, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 0, 0);
+  }
+}
+
+.highlight-focus {
+  animation: highlightFocus 2s ease-in-out;
+}

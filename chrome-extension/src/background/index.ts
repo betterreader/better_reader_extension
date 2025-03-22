@@ -28,7 +28,7 @@ exampleThemeStorage.get().then(theme => {
 console.log('Background loaded');
 console.log("Edit 'chrome-extension/src/background/index.ts' and save to reload.");
 
-// ADDED: Background script to open side panel on click
+// Background script to open side panel on click
 chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
   if (!tab.id) return;
 

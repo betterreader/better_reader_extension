@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { Highlighter } from './Highlighter';
 
 export default function App() {
-  useEffect(() => {
-    console.log('runtime content view loaded');
-  }, []);
-
-  return <div className="runtime-content-view-text">runtime content view</div>;
+  return (
+    <div className="better-reader-runtime">
+      <Highlighter />
+    </div>
+  );
 }

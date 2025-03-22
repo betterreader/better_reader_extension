@@ -39,7 +39,6 @@ const manifest = {
   action: {
     default_icon: 'icon-34.png',
   },
-  chrome_url_overrides: {},
   icons: {
     '128': 'icon-128.png',
   },
@@ -50,11 +49,15 @@ const manifest = {
     },
     {
       matches: ['http://*/*', 'https://*/*', '<all_urls>'],
+      css: ['content.css'],
+    },
+    {
+      matches: ['http://*/*', 'https://*/*', '<all_urls>'],
       js: ['content-ui/index.iife.js'],
     },
     {
       matches: ['http://*/*', 'https://*/*', '<all_urls>'],
-      css: ['content.css'],
+      js: ['content-runtime/index.iife.js'],
     },
   ],
   devtools_page: 'devtools/index.html',

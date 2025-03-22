@@ -1,6 +1,12 @@
-import { sampleFunction } from '@src/sampleFunction';
+import { initHighlighter } from './highlighter';
 
-console.log('content script loaded');
+// Initialize highlighter when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    initHighlighter();
+  });
+} else {
+  initHighlighter();
+}
 
-// Shows how to call a function defined in another module
-sampleFunction();
+console.log('Content script loaded');

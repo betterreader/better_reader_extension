@@ -1,0 +1,111 @@
+/* Base highlight styles */
+.highlight-yellow {
+  background-color: #ffeb3b !important;
+  background-image: none !important;
+  color: inherit !important;
+  display: inline !important;
+  padding: 2px 0 !important;
+  margin: 0 !important;
+  border-radius: 2px !important;
+  cursor: pointer !important;
+  box-decoration-break: clone !important;
+  -webkit-box-decoration-break: clone !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.highlight-green {
+  background-color: #a5d6a7 !important;
+  background-image: none !important;
+  color: inherit !important;
+  display: inline !important;
+  padding: 2px 0 !important;
+  margin: 0 !important;
+  border-radius: 2px !important;
+  cursor: pointer !important;
+  box-decoration-break: clone !important;
+  -webkit-box-decoration-break: clone !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.highlight-blue {
+  background-color: #90caf9 !important;
+  background-image: none !important;
+  color: inherit !important;
+  display: inline !important;
+  padding: 2px 0 !important;
+  margin: 0 !important;
+  border-radius: 2px !important;
+  cursor: pointer !important;
+  box-decoration-break: clone !important;
+  -webkit-box-decoration-break: clone !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.highlight-pink {
+  background-color: #f48fb1 !important;
+  background-image: none !important;
+  color: inherit !important;
+  display: inline !important;
+  padding: 2px 0 !important;
+  margin: 0 !important;
+  border-radius: 2px !important;
+  cursor: pointer !important;
+  box-decoration-break: clone !important;
+  -webkit-box-decoration-break: clone !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* Ensure highlights work across line breaks */
+.highlight-yellow,
+.highlight-green,
+.highlight-blue,
+.highlight-pink {
+  box-shadow: 0 0 0 2px currentColor inset !important;
+  mix-blend-mode: multiply !important;
+}
+
+/* Popup styles */
+.highlight-popup {
+  position: absolute !important;
+  background: white !important;
+  border: 1px solid #ccc !important;
+  border-radius: 4px !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2) !important;
+  padding: 8px !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  gap: 4px !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.highlight-color-btn {
+  width: 24px !important;
+  height: 24px !important;
+  border: 1px solid #ccc !important;
+  border-radius: 50% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+  transition: transform 0.2s !important;
+  display: block !important;
+}
+
+.highlight-color-btn:hover {
+  transform: scale(1.1) !important;
+}
+
+/* Ensure the popup is above other elements */
+#better-reader-highlights,
+#better-reader-runtime {
+  z-index: 2147483646 !important;
+}
+
+/* Override any potential site styles that might interfere */
+::selection {
+  background: rgba(0, 0, 255, 0.1) !important;
+}
