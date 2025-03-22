@@ -14,7 +14,21 @@ interface SendSelectedTextMessage {
   mode: string;
 }
 
-type BackgroundMessage = GetArticleContentMessage | SendSelectedTextMessage;
+interface ExplainWithAIMessage {
+  action: 'explainWithAI';
+  text: string;
+  mode: string;
+}
+
+interface OpenSidePanelMessage {
+  action: 'openSidePanel';
+}
+
+type BackgroundMessage =
+  | GetArticleContentMessage
+  | SendSelectedTextMessage
+  | ExplainWithAIMessage
+  | OpenSidePanelMessage;
 
 interface ArticleContent {
   content: string;
@@ -137,7 +151,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           });
 
           // Try to send a message to the side panel with the selected text and context
-          // This is a backup approach in case the panel is already open
           try {
             chrome.runtime.sendMessage(
               {
@@ -185,10 +198,115 @@ chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
 // Listen for messages from the side panel
 chrome.runtime.onMessage.addListener(
   (
-    message: BackgroundMessage,
+    message: BackgroundMessage | any,
     sender: chrome.runtime.MessageSender,
-    sendResponse: (response: MessageResponse) => void,
+    sendResponse: (response: MessageResponse | any) => void,
   ): boolean => {
+    // Handle explainWithAI action from ELI5 button
+    if (message.action === 'explainWithAI') {
+      console.log('Received explainWithAI message:', message);
+
+      // Get the current active tab
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
+        const activeTab = tabs[0];
+        if (activeTab && activeTab.id) {
+          // Execute script to get surrounding paragraph and title
+          chrome.scripting.executeScript(
+            {
+              target: { tabId: activeTab.id },
+              func: selectedText => {
+                // Function to get the surrounding paragraph of the selected text
+                const getSurroundingParagraph = (selectedText: string) => {
+                  const selection = window.getSelection();
+                  if (!selection || selection.rangeCount === 0) return '';
+
+                  const range = selection.getRangeAt(0);
+                  let node = range.startContainer;
+
+                  // Navigate up to find the paragraph or block-level element
+                  while (node && node.nodeType === Node.TEXT_NODE) {
+                    node = node.parentNode;
+                  }
+
+                  // Get the closest paragraph or block element
+                  const blockElement = node.closest('p, div, article, section') || node;
+                  return blockElement.textContent || '';
+                };
+
+                return {
+                  selectedText: selectedText,
+                  paragraph: getSurroundingParagraph(selectedText),
+                  title: document.title,
+                };
+              },
+              args: [message.text],
+            },
+            results => {
+              if (results && results[0]?.result) {
+                const { selectedText, paragraph, title } = results[0].result;
+
+                // Store the selected text and context to be retrieved by the side panel
+                chrome.storage.local.set({
+                  selectedTextForExplanation: {
+                    text: selectedText,
+                    paragraph: paragraph,
+                    title: title,
+                    mode: message.mode,
+                    timestamp: Date.now(),
+                  },
+                });
+
+                // Try to send a message to the side panel with the selected text and context
+                try {
+                  chrome.runtime.sendMessage(
+                    {
+                      action: 'sendSelectedText',
+                      text: selectedText,
+                      paragraph: paragraph,
+                      title: title,
+                      mode: message.mode,
+                    },
+                    response => {
+                      if (chrome.runtime.lastError) {
+                        console.log('Side panel not ready to receive messages yet:', chrome.runtime.lastError.message);
+                        console.log('Will use storage for communication instead.');
+                      } else if (response && response.status === 'received') {
+                        console.log('Message successfully delivered to side panel');
+                      }
+                    },
+                  );
+                } catch (error) {
+                  console.log('Error sending message to side panel:', error);
+                  console.log('Using storage for communication instead.');
+                }
+              }
+            },
+          );
+        }
+      });
+
+      return true;
+    }
+
+    // Handle openSidePanel action
+    if (message.action === 'openSidePanel') {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
+        const activeTab = tabs[0];
+        if (activeTab && activeTab.id) {
+          // Open the side panel
+          chrome.sidePanel.setOptions({
+            tabId: activeTab.id,
+            path: 'side-panel/index.html',
+            enabled: true,
+          });
+
+          chrome.sidePanel.open({ tabId: activeTab.id });
+        }
+      });
+
+      return true;
+    }
+
     if (message.action === 'getArticleContent') {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
         const activeTab = tabs[0];

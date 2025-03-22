@@ -24,13 +24,33 @@ export function initHighlighter() {
 
     const newPopup = document.createElement('div');
     newPopup.className = 'highlight-popup';
+    newPopup.style.position = 'absolute';
+    newPopup.style.zIndex = '9999';
+    newPopup.style.backgroundColor = 'white';
+    newPopup.style.border = '1px solid #ccc';
+    newPopup.style.borderRadius = '4px';
+    newPopup.style.padding = '8px';
+    newPopup.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.2)';
     newPopup.style.left = `${x}px`;
     newPopup.style.top = `${y - 45}px`;
+
+    // Create container for color buttons
+    const colorContainer = document.createElement('div');
+    colorContainer.className = 'highlight-color-container';
+    colorContainer.style.display = 'flex';
+    colorContainer.style.marginBottom = '8px';
+    colorContainer.style.justifyContent = 'space-between';
 
     const colors = ['yellow', 'green', 'blue', 'pink'];
     colors.forEach(color => {
       const button = document.createElement('button');
       button.className = 'highlight-color-btn';
+      button.style.width = '24px';
+      button.style.height = '24px';
+      button.style.borderRadius = '50%';
+      button.style.border = '1px solid #ddd';
+      button.style.margin = '0 4px';
+      button.style.cursor = 'pointer';
       button.style.backgroundColor = color;
 
       // Use mousedown instead of click to ensure it fires before popup removal
@@ -42,8 +62,63 @@ export function initHighlighter() {
         dispatchHighlightEvent(color);
       });
 
-      newPopup.appendChild(button);
+      colorContainer.appendChild(button);
     });
+
+    newPopup.appendChild(colorContainer);
+
+    // Add a separator
+    const separator = document.createElement('div');
+    separator.style.borderTop = '1px solid #eee';
+    separator.style.margin = '4px 0';
+    newPopup.appendChild(separator);
+
+    // Add ELI5 button
+    const eli5Button = document.createElement('button');
+    eli5Button.className = 'eli5-button';
+    eli5Button.textContent = 'ELI5';
+    eli5Button.style.backgroundColor = '#4285f4';
+    eli5Button.style.color = 'white';
+    eli5Button.style.border = 'none';
+    eli5Button.style.borderRadius = '4px';
+    eli5Button.style.padding = '4px 8px';
+    eli5Button.style.fontSize = '12px';
+    eli5Button.style.fontWeight = 'bold';
+    eli5Button.style.cursor = 'pointer';
+    eli5Button.style.width = '100%';
+    eli5Button.style.textAlign = 'center';
+
+    eli5Button.addEventListener('mousedown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      isClickingPopup = true;
+
+      // Get the current selection
+      if (currentSelection && !currentSelection.isCollapsed) {
+        const selectedText = currentSelection.toString();
+
+        // Send message to background script to trigger explanation with "examples" mode
+        chrome.runtime.sendMessage({
+          action: 'explainWithAI',
+          text: selectedText,
+          mode: 'examples',
+          source: 'eli5Button',
+        });
+
+        // Open side panel
+        chrome.runtime.sendMessage({
+          action: 'openSidePanel',
+        });
+      }
+
+      // Remove popup after clicking
+      if (popup) {
+        document.body.removeChild(popup);
+        popup = null;
+      }
+    });
+
+    newPopup.appendChild(eli5Button);
 
     document.body.appendChild(newPopup);
     popup = newPopup;
