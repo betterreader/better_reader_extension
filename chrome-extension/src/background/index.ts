@@ -94,7 +94,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.scripting.executeScript(
       {
         target: { tabId: tab.id },
-        function: selectedText => {
+        func: selectedText => {
           // Function to get the surrounding paragraph of the selected text
           const getSurroundingParagraph = (selectedText: string) => {
             const selection = window.getSelection();
@@ -193,10 +193,23 @@ chrome.runtime.onMessage.addListener(
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
         const activeTab = tabs[0];
         if (activeTab && activeTab.id) {
+          // Check if the URL is a restricted URL (chrome://, chrome-extension://, etc.)
+          const url = activeTab.url || '';
+          if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('devtools://')) {
+            console.error('Cannot access restricted URL:', url);
+            sendResponse({
+              error: 'Cannot access this page. Try opening a regular web page.',
+              content: 'Hi there! I can help you understand this article better. Ask me anything about it.',
+              title: 'Better Reader',
+              url: url,
+            });
+            return;
+          }
+
           chrome.scripting.executeScript(
             {
               target: { tabId: activeTab.id },
-              func: extractArticleContent, // Changed 'function' to 'func'
+              func: extractArticleContent,
             },
             (results?: chrome.scripting.InjectionResult<ArticleContent>[]) => {
               if (chrome.runtime.lastError) {

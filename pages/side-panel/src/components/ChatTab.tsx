@@ -300,7 +300,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
     <div className="flex flex-col h-full">
       <div
         className="flex-1 overflow-y-auto p-4 flex flex-col gap-3"
-        style={{ maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
+        style={{ maxHeight: 'calc(100vh - 170px)', overflowY: 'auto' }}>
         {messages.map((msg, index) => (
           <div
             key={index}
