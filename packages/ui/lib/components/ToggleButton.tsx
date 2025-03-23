@@ -1,7 +1,6 @@
 import { exampleThemeStorage } from '@extension/storage';
 import { useStorage } from '@extension/shared';
 import type { ComponentPropsWithoutRef } from 'react';
-import { cn } from '@/lib/utils';
 
 type ToggleButtonProps = ComponentPropsWithoutRef<'button'>;
 
@@ -9,15 +8,8 @@ export const ToggleButton = ({ className, children, ...props }: ToggleButtonProp
   const theme = useStorage(exampleThemeStorage);
 
   return (
-    <button
-      className={cn(
-        className,
-        'rounded shadow hover:scale-105 text-2xl',
-        theme === 'light' ? 'border-black' : 'border-white',
-        'border-2 font-bold',
-      )}
-      onClick={exampleThemeStorage.toggle}>
-      {theme === 'dark' ? '🌙' : '☀️'}
+    <button className={`w-full text-left text-sm`} onClick={exampleThemeStorage.toggle}>
+      {theme === 'light' ? 'Dark Mode 🌙' : 'Light Mode ☀️'}
     </button>
   );
 };

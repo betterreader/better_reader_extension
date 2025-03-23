@@ -3,11 +3,15 @@ import { useEffect, useState } from 'react';
 import '@src/index.css';
 import SidePanel from '@src/SidePanel';
 import AuthScreen from '@src/components/AuthScreen';
-import { supabase } from '@src/lib/supabase';
+import { getSupabaseClient } from '@extension/shared/lib/utils/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 
 function App() {
+  // TODO: validate if useState is needed
   const [session, setSession] = useState<Session | null>(null);
+
+  // Singleton instance of Supabase client
+  const supabase = getSupabaseClient();
 
   async function getSessionFromStorage() {
     try {
@@ -43,30 +47,25 @@ function App() {
     // Listen for auth state changes to update the session state automatically
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
 
-    // Listen for chrome storage changes
-    const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      if (changes.session) {
-        const newSession = changes.session.newValue;
-        if (newSession) {
-          // Update Supabase auth state with the new session
-          supabase.auth
-            .setSession(newSession)
-            .then(({ data: { session } }) => {
-              setSession(session);
-            })
-            .catch(error => {
-              console.error('Error setting session:', error);
-            });
-        }
+    function handleSessionMessage(message: any) {
+      if (message.type === 'SESSION_UPDATED' && 'session' in message) {
+        supabase.auth
+          .setSession(message.session)
+          .then(({ data: { session } }) => {
+            setSession(session);
+          })
+          .catch(error => {
+            console.error('Error setting session:', error);
+          });
       }
-    };
+    }
 
-    chrome.storage.local.onChanged.addListener(storageListener);
+    chrome.runtime.onMessage.addListener(handleSessionMessage);
 
     // Cleanup subscriptions on unmount
     return () => {
       authListener.subscription.unsubscribe();
-      chrome.storage.local.onChanged.removeListener(storageListener);
+      chrome.runtime.onMessage.removeListener(handleSessionMessage);
     };
   }, []);
 

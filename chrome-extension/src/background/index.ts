@@ -401,8 +401,8 @@ function extractArticleContent(): ArticleContent {
 }
 
 // Supabase Oauth Listener Setup
-import { createClient } from '@supabase/supabase-js';
-import { supabase } from '@supabase/auth-ui-shared';
+import { getSupabaseClient } from '@extension/shared/lib/utils/supabaseClient';
+
 // add tab listener when background script starts
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url?.startsWith(chrome.identity.getRedirectURL())) {
@@ -417,14 +417,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 async function finishUserOAuth(url: string) {
   try {
     console.log(`handling user OAuth callback ...`);
-    const supabase_url = process.env.CEB_SUPABASE_URL;
-    const supabase_anon_key = process.env.CEB_SUPABASE_ANON_KEY;
-    if (!supabase_url || !supabase_anon_key) {
-      throw new Error(`missing supabase URL or anon key`);
-    }
-
-    const supabase = createClient(supabase_url, supabase_anon_key);
-
+    const supabase = getSupabaseClient();
     // extract tokens from hash
     const hashMap = parseUrlHash(url);
     const access_token = hashMap.get('access_token');
@@ -443,10 +436,13 @@ async function finishUserOAuth(url: string) {
     // persist session to storage
     await chrome.storage.local.set({ session: data.session });
 
-    console.log('Stored session:', data.session);
+    // send message
+    chrome.runtime.sendMessage({ type: 'SESSION_UPDATED', session: data.session });
 
     // finally, redirect to the home page
-    chrome.tabs.update({ url: 'localhost:3000' });
+    // TODO: add secret key to handle prod vs dev
+    // TODO: consider redirecting to an extension page instead of website
+    chrome.tabs.update({ url: 'http://localhost:3000' });
 
     console.log(`finished handling user OAuth callback`);
   } catch (error) {
