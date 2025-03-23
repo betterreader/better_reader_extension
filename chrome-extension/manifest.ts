@@ -17,8 +17,17 @@ const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
  * @prop content_scripts
  * css: ['content.css'], // public folder
  */
+
+const chrome_runtime_id = process.env.CEB_CHROME_RUNTIME_ID;
+const google_client_id = process.env.CEB_GOOGLE_EXTENSION_CLIENT_ID;
+
+if (!chrome_runtime_id || !google_client_id) {
+  throw new Error('Missing environment variables');
+}
+
 const manifest = {
   manifest_version: 3,
+  key: chrome_runtime_id,
   default_locale: 'en',
   name: '__MSG_extensionName__',
   browser_specific_settings: {
@@ -30,7 +39,11 @@ const manifest = {
   version: packageJson.version,
   description: '__MSG_extensionDescription__',
   host_permissions: ['<all_urls>'],
-  permissions: ['storage', 'scripting', 'tabs', 'notifications', 'sidePanel', 'contextMenus'],
+  permissions: ['storage', 'scripting', 'tabs', 'notifications', 'sidePanel', 'contextMenus', 'identity'],
+  oauth2: {
+    client_id: google_client_id,
+    scopes: ['openid', 'email', 'profile'],
+  },
   options_page: 'options/index.html',
   background: {
     service_worker: 'background.js',

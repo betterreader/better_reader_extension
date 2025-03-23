@@ -4,8 +4,8 @@ import QuizTab from '@src/components/QuizTab';
 import NotesTab from '@src/components/NotesTab';
 import ResearchTab from '@src/components/ResearchTab';
 import SummaryTab from '@src/components/SummaryTab';
-import { ToggleButton } from '@extension/ui';
 import { exampleThemeStorage } from '@extension/storage';
+import SettingsDropdown from '@src/components/SettingsDropdown';
 import { useStorage } from '@extension/shared';
 
 export interface ArticleData {
@@ -135,7 +135,7 @@ const App: React.FC = () => {
         className={`flex flex-col p-4 ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'}`}>
         <div className="flex justify-between items-center mb-2">
           <span className="text-2xl font-extrabold">BetterReader</span>
-          <ToggleButton />
+          <SettingsDropdown theme={theme} />
         </div>
         <div className={`text-base font-medium truncate ${theme === 'light' ? 'text-gray-600' : 'text-gray-300'}`}>
           {articleData?.title || 'Article Not Found'}

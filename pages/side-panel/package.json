@@ -23,7 +23,8 @@
     "@extension/shared": "workspace:*",
     "@extension/storage": "workspace:*",
     "@extension/i18n": "workspace:*",
-    "@extension/ui": "workspace:*"
+    "@extension/ui": "workspace:*",
+    "@supabase/supabase-js": "^2.39.7"
   },
   "devDependencies": {
     "@extension/tailwindcss-config": "workspace:*",

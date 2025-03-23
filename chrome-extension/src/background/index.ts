@@ -399,3 +399,72 @@ function extractArticleContent(): ArticleContent {
     title: document.title,
   };
 }
+
+// Supabase Oauth Listener Setup
+import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@supabase/auth-ui-shared';
+// add tab listener when background script starts
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url?.startsWith(chrome.identity.getRedirectURL())) {
+    console.log('Redirect URL detected:', changeInfo.url);
+    finishUserOAuth(changeInfo.url);
+  }
+});
+
+/**
+ * Method used to finish OAuth callback for a user authentication.
+ */
+async function finishUserOAuth(url: string) {
+  try {
+    console.log(`handling user OAuth callback ...`);
+    const supabase_url = process.env.CEB_SUPABASE_URL;
+    const supabase_anon_key = process.env.CEB_SUPABASE_ANON_KEY;
+    if (!supabase_url || !supabase_anon_key) {
+      throw new Error(`missing supabase URL or anon key`);
+    }
+
+    const supabase = createClient(supabase_url, supabase_anon_key);
+
+    // extract tokens from hash
+    const hashMap = parseUrlHash(url);
+    const access_token = hashMap.get('access_token');
+    const refresh_token = hashMap.get('refresh_token');
+    if (!access_token || !refresh_token) {
+      throw new Error(`no supabase tokens found in URL hash`);
+    }
+
+    // check if they work
+    const { data, error } = await supabase.auth.setSession({
+      access_token,
+      refresh_token,
+    });
+    if (error) throw error;
+
+    // persist session to storage
+    await chrome.storage.local.set({ session: data.session });
+
+    console.log('Stored session:', data.session);
+
+    // finally, redirect to the home page
+    chrome.tabs.update({ url: 'localhost:3000' });
+
+    console.log(`finished handling user OAuth callback`);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+/**
+ * Helper method used to parse the hash of a redirect URL.
+ */
+function parseUrlHash(url: string) {
+  const hashParts = new URL(url).hash.slice(1).split('&');
+  const hashMap = new Map(
+    hashParts.map(part => {
+      const [name, value] = part.split('=');
+      return [name, value];
+    }),
+  );
+
+  return hashMap;
+}
