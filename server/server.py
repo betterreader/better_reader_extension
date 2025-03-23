@@ -51,53 +51,43 @@ def chat():
     
     print(f"Processing chat request: '{message}' for article '{article_title}'")
     
-    # Create prompt for Gemini
-    if quiz_context:
-        base_prompt = f"""
-        Article Title: {article_title}
-        
-        Article Content: 
-        {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
-        
-        Quiz Context:
-        {quiz_context}
-        
-        User Message: {message}
-        
-        You are an AI assistant helping a user understand an article and answering questions about a quiz based on the article.
-        If the user is asking about the quiz, refer to the quiz context and provide helpful information.
-        If the user is asking about the article content, focus on providing accurate information from the article.
-        Keep your response concise and focused on answering the user's question.
-        """
-    else:
-        base_prompt = f"""
-        Article Title: {article_title}
-        
-        Article Content: 
-        {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
-        
-        User Message: {message}
-        
-        You are an AI assistant helping a user understand an article. Respond to their message based on the article content.
-        Keep your response concise and focused on answering the user's question.
-        """
+    # First, determine if the question can be answered from the article
+    evaluation_prompt = f"""
+    Article Title: {article_title}
     
-    # Prepare request to Gemini API
-    payload = {
+    Article Content: 
+    {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+    
+    User Question: {message}
+    
+    Task: Determine if the user's question can be directly answered using information from the article.
+    
+    Instructions:
+    1. Analyze the user's question and the article content.
+    2. Determine if the article contains the necessary information to provide a complete and accurate answer.
+    3. Respond with either "ANSWERABLE_FROM_ARTICLE" or "REQUIRES_GENERAL_KNOWLEDGE" followed by a brief explanation.
+    
+    Example responses:
+    "ANSWERABLE_FROM_ARTICLE: The article directly discusses this topic in paragraph 3."
+    "REQUIRES_GENERAL_KNOWLEDGE: The article doesn't cover this specific information about [topic]."
+    """
+    
+    # Prepare request to Gemini API for evaluation
+    evaluation_payload = {
         "contents": [
             {
                 "parts": [
                     {
-                        "text": base_prompt
+                        "text": evaluation_prompt
                     }
                 ]
             }
         ],
         "generationConfig": {
-            "temperature": 0.7,
+            "temperature": 0.2,
             "topK": 40,
             "topP": 0.95,
-            "maxOutputTokens": 1024
+            "maxOutputTokens": 256
         }
     }
     
@@ -106,20 +96,103 @@ def chat():
     }
     
     try:
-        print("Sending request to Gemini API")
-        response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
-        response_data = response.json()
+        print("Evaluating if question can be answered from article")
+        evaluation_response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(evaluation_payload))
+        evaluation_data = evaluation_response.json()
         
-        print(f"Received response from Gemini API: {response.status_code}")
-        
-        if 'candidates' in response_data and len(response_data['candidates']) > 0:
-            generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
-            print("Successfully generated response")
-            return jsonify({'response': generated_text})
+        if 'candidates' in evaluation_data and len(evaluation_data['candidates']) > 0:
+            evaluation_result = evaluation_data['candidates'][0]['content']['parts'][0]['text']
+            print(f"Evaluation result: {evaluation_result}")
+            
+            requires_general_knowledge = "REQUIRES_GENERAL_KNOWLEDGE" in evaluation_result
+            
+            # Create prompt based on evaluation result
+            if quiz_context:
+                base_prompt = f"""
+                Article Title: {article_title}
+                
+                Article Content: 
+                {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+                
+                Quiz Context:
+                {quiz_context}
+                
+                User Message: {message}
+                
+                You are an AI assistant helping a user understand an article and answering questions about a quiz based on the article.
+                If the user is asking about the quiz, refer to the quiz context and provide helpful information.
+                If the user is asking about the article content, focus on providing accurate information from the article.
+                Keep your response concise and focused on answering the user's question.
+                """
+            elif requires_general_knowledge:
+                base_prompt = f"""
+                Article Title: {article_title}
+                
+                Article Content: 
+                {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+                
+                User Message: {message}
+                
+                You are an AI assistant helping a user understand an article and related topics.
+                
+                The user's question appears to be about a topic that is not directly covered in the article.
+                You should:
+                1. Acknowledge that the specific information isn't covered in the article
+                2. Provide a helpful response based on your general knowledge
+                3. If relevant, connect your answer back to the article's topic
+                
+                Keep your response concise and focused on answering the user's question.
+                """
+            else:
+                base_prompt = f"""
+                Article Title: {article_title}
+                
+                Article Content: 
+                {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+                
+                User Message: {message}
+                
+                You are an AI assistant helping a user understand an article. Respond to their message based on the article content.
+                Keep your response concise and focused on answering the user's question.
+                """
+            
+            # Prepare request to Gemini API for final response
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": base_prompt
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "topK": 40,
+                    "topP": 0.95,
+                    "maxOutputTokens": 1024
+                }
+            }
+            
+            print("Sending request to Gemini API for final response")
+            response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+            response_data = response.json()
+            
+            print(f"Received response from Gemini API: {response.status_code}")
+            
+            if 'candidates' in response_data and len(response_data['candidates']) > 0:
+                generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
+                print("Successfully generated response")
+                return jsonify({'response': generated_text, 'usedGeneralKnowledge': requires_general_knowledge})
+            else:
+                error_message = response_data.get('error', {}).get('message', 'Unknown error')
+                print(f"Failed to generate response: {error_message}")
+                return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
         else:
-            error_message = response_data.get('error', {}).get('message', 'Unknown error')
-            print(f"Failed to generate response: {error_message}")
-            return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
+            error_message = evaluation_data.get('error', {}).get('message', 'Unknown error')
+            print(f"Failed to evaluate question: {error_message}")
+            return jsonify({'error': 'Failed to evaluate question', 'details': error_message}), 500
     
     except Exception as e:
         print(f"Exception occurred: {str(e)}")
