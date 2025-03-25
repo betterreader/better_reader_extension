@@ -102,7 +102,16 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       enabled: true,
     });
 
-    chrome.sidePanel.open({ tabId: tab.id });
+    // Get the current window ID and open the side panel
+    chrome.windows.getCurrent(currentWindow => {
+      if (currentWindow && currentWindow.id) {
+        try {
+          chrome.sidePanel.open({ windowId: currentWindow.id });
+        } catch (error) {
+          console.error('Error opening side panel:', error);
+        }
+      }
+    });
 
     // Execute a content script to get the surrounding paragraph and page title
     chrome.scripting.executeScript(
@@ -192,7 +201,16 @@ chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
     enabled: true,
   });
 
-  chrome.sidePanel.open({ tabId: tab.id });
+  // Get the current window ID and open the side panel
+  chrome.windows.getCurrent(currentWindow => {
+    if (currentWindow && currentWindow.id) {
+      try {
+        chrome.sidePanel.open({ windowId: currentWindow.id });
+      } catch (error) {
+        console.error('Error opening side panel:', error);
+      }
+    }
+  });
 });
 
 // Listen for messages from the side panel
@@ -256,6 +274,24 @@ chrome.runtime.onMessage.addListener(
                   },
                 });
 
+                // Open the side panel
+                chrome.sidePanel.setOptions({
+                  tabId: activeTab.id,
+                  path: 'side-panel/index.html',
+                  enabled: true,
+                });
+
+                // Get the current window ID and open the side panel
+                chrome.windows.getCurrent(currentWindow => {
+                  if (currentWindow && currentWindow.id) {
+                    try {
+                      chrome.sidePanel.open({ windowId: currentWindow.id });
+                    } catch (error) {
+                      console.error('Error opening side panel:', error);
+                    }
+                  }
+                });
+
                 // Try to send a message to the side panel with the selected text and context
                 try {
                   chrome.runtime.sendMessage(
@@ -300,7 +336,16 @@ chrome.runtime.onMessage.addListener(
             enabled: true,
           });
 
-          chrome.sidePanel.open({ tabId: activeTab.id });
+          // Get the current window ID and open the side panel
+          chrome.windows.getCurrent(currentWindow => {
+            if (currentWindow && currentWindow.id) {
+              try {
+                chrome.sidePanel.open({ windowId: currentWindow.id });
+              } catch (error) {
+                console.error('Error opening side panel:', error);
+              }
+            }
+          });
         }
       });
 

@@ -1,14 +1,23 @@
-from flask import Flask, request, jsonify, g
-import requests, json 
-import os
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+import time
 from dotenv import load_dotenv
-from supabase import create_client
+import requests
+import json
+import os
+import re
+import uuid
+import numpy as np
+from supabase import create_client, Client
+from typing import List, Dict, Any, Optional, Tuple
+import datetime
 from functools import wraps
 
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+# Enable CORS for all routes with more specific configuration
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
@@ -746,7 +755,7 @@ def generate_image():
         print(f"Error generating image: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/explanation', methods=['POST'])
+@app.route('/api/explain', methods=['POST'])
 def handle_explanation_request():
     try:
         data = request.json

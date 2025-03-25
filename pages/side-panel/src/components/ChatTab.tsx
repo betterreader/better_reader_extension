@@ -172,8 +172,8 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
           const newMessages = [...prev];
           // Remove typing indicator (last message)
           newMessages.pop();
-          if (data.explanation) {
-            newMessages.push({ sender: 'bot', text: data.explanation });
+          if (data.response) {
+            newMessages.push({ sender: 'bot', text: data.response });
           } else if (data.error) {
             newMessages.push({ sender: 'bot', text: `Error: ${data.error}` });
           }
@@ -266,11 +266,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
           // Remove typing indicator (last message)
           newMessages.pop();
           if (data.response) {
-            newMessages.push({
-              sender: 'bot',
-              text: data.response,
-              usedGeneralKnowledge: data.usedGeneralKnowledge,
-            });
+            newMessages.push({ sender: 'bot', text: data.response, usedGeneralKnowledge: data.usedGeneralKnowledge });
           } else if (data.error) {
             newMessages.push({ sender: 'bot', text: `Error: ${data.error}` });
           }
