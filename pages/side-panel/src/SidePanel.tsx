@@ -7,6 +7,7 @@ import SummaryTab from '@src/components/SummaryTab';
 import { exampleThemeStorage } from '@extension/storage';
 import SettingsDropdown from '@src/components/SettingsDropdown';
 import { useStorage } from '@extension/shared';
+import { Session } from '@supabase/supabase-js';
 
 export interface ArticleData {
   content: string;
@@ -38,9 +39,13 @@ export interface Message {
   text: string;
 }
 
+interface SidePanelProps {
+  session: Session | null;
+}
+
 const API_BASE_URL = 'http://localhost:5007';
 
-const App: React.FC = () => {
+const App: React.FC<SidePanelProps> = ({ session }) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'quiz' | 'notes' | 'research' | 'summary'>('chat');
   const [articleData, setArticleData] = useState<ArticleData | null>(null);
   const theme = useStorage(exampleThemeStorage);
@@ -99,16 +104,25 @@ const App: React.FC = () => {
     };
     chrome.tabs.onUpdated.addListener(tabUpdateListener);
 
+    // Listen for tab switches to fetch new content
+    // Listen for tab switches to fetch new content
+    const tabSwitchListener = (activeInfo: chrome.tabs.TabActiveInfo) => {
+      console.log('SidePanel: Tab switch detected, fetching new content');
+      fetchArticleContent();
+    };
+
+    chrome.tabs.onActivated.addListener(tabSwitchListener);
+
     // Listen for messages from background script to switch to chat tab
     // when text is selected for explanation
-    const messageListener = (message: any) => {
+    const sendSelectedTextListener = (message: any) => {
       if (message.action === 'sendSelectedText' && message.text) {
         // Switch to chat tab when text is selected for explanation
         setActiveTab('chat');
       }
     };
 
-    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.runtime.onMessage.addListener(sendSelectedTextListener);
 
     // Also check if there's stored selected text
     chrome.storage.local.get(['selectedTextForExplanation'], result => {
@@ -120,8 +134,9 @@ const App: React.FC = () => {
 
     // Clean up listeners on unmount
     return () => {
-      chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.runtime.onMessage.removeListener(sendSelectedTextListener);
       chrome.tabs.onUpdated.removeListener(tabUpdateListener);
+      chrome.tabs.onActivated.removeListener(tabSwitchListener);
     };
   }, []);
 
@@ -134,7 +149,11 @@ const App: React.FC = () => {
       <header
         className={`flex flex-col p-4 ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'}`}>
         <div className="flex justify-between items-center mb-2">
-          <span className="text-2xl font-extrabold">BetterReader</span>
+          <span className="text-2xl font-extrabold">
+            <a href="http://localhost:3000" target="_blank" rel="noopener noreferrer">
+              BetterReader
+            </a>
+          </span>
           <SettingsDropdown theme={theme} />
         </div>
         <div className={`text-base font-medium truncate ${theme === 'light' ? 'text-gray-600' : 'text-gray-300'}`}>
@@ -233,7 +252,7 @@ const App: React.FC = () => {
           />
         </div>
         <div className={`h-full ${activeTab !== 'notes' ? 'hidden' : ''}`}>
-          <NotesTab key={articleData?.url || 'no-article'} theme={theme} />
+          <NotesTab key={articleData?.url || 'no-article'} theme={theme} session={session} />
         </div>
         <div className={`h-full ${activeTab !== 'research' ? 'hidden' : ''}`}>
           <ResearchTab

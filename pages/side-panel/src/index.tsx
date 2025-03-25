@@ -69,7 +69,7 @@ function App() {
     };
   }, []);
 
-  return session ? <SidePanel /> : <AuthScreen onLogin={loginWithGoogle} />;
+  return session ? <SidePanel session={session} /> : <AuthScreen onLogin={loginWithGoogle} />;
 }
 
 function init() {

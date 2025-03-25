@@ -1,17 +1,138 @@
-from flask import Flask, request, jsonify
-import requests
-import json
+from flask import Flask, request, jsonify, g
+import requests, json 
 import os
 from flask_cors import CORS
-import time
 from dotenv import load_dotenv
+from supabase import create_client
+from functools import wraps
 
-# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-# Enable CORS for all routes with more specific configuration
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+# NOTE: These supabase functions aren't being used at the moment
+def require_supabase_user(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+
+        access_token = auth_header.split(" ")[1]
+
+        try:
+            user_response = supabase.auth.get_user(access_token)
+            user = user_response.user
+            if not user:
+                raise Exception("User not found")
+            g.user = user  # Attach to Flask's request context
+        except Exception as e:
+            print("Auth failed:", e)
+            return jsonify({"error": "Invalid or expired token"}), 401
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@app.route('/api/highlights', methods=['POST'])
+@require_supabase_user
+def create_highlight():
+    try:
+        data = request.json
+        required_fields = ['url', 'color', 'start_xpath', 'start_offset', 'end_xpath', 'end_offset', 'text']
+        
+        if not all(field in data for field in required_fields):
+            print(data)
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        user_id = g.user.id 
+            
+        # Insert highlight into Supabase
+        highlight_data = {
+            'url': data['url'],
+            'color': data['color'],
+            'start_xpath': data['start_xpath'],
+            'start_offset': data['start_offset'],
+            'end_xpath': data['end_xpath'],
+            'end_offset': data['end_offset'],
+            'comment': data.get('comment', ' '),
+            'user_id': user_id,
+            'text': data['text']
+        }
+        
+        result = supabase.table('highlight').insert(highlight_data).execute()
+        return jsonify(result.data[0])
+    except Exception as e:
+        print(f"Error creating highlight: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/highlights', methods=['GET'])
+@require_supabase_user
+def get_highlights():
+    try:
+        url = request.args.get('url')
+        if not url:
+            return jsonify({'error': 'URL parameter is required'}), 400
+            
+        # Query highlights for the specific URL and user
+        user_id = g.user.id
+        result = supabase.table('highlight')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .eq('url', url)\
+            .execute()
+            
+        return jsonify(result.data)
+    except Exception as e:
+        print(f"Error getting highlights: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/highlights/<int:highlight_id>', methods=['DELETE'])
+@require_supabase_user
+def delete_highlight(highlight_id):
+    try:
+        # Delete the highlight
+        user_id = g.user.id
+        result = supabase.table('highlight')\
+            .delete()\
+            .eq('id', highlight_id)\
+            .eq('user_id', user_id)\
+            .execute()
+            
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Error deleting highlight: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/highlights/<int:highlight_id>', methods=['PUT'])
+@require_supabase_user
+def update_highlight(highlight_id):
+    try:
+        data = request.json
+        # TODO: choose which fields to update
+        update_data = {k: v for k, v in data.items()}
+        
+        if not update_data:
+            return jsonify({'error': 'No valid fields to update'}), 400
+            
+        # Update the highlight
+        user_id = g.user.id
+        result = supabase.table('highlight')\
+            .update(update_data)\
+            .eq('id', highlight_id)\
+            .eq('user_id', user_id)\
+            .execute()
+            
+        return jsonify(result.data[0])
+    except Exception as e:
+        print(f"Error updating highlight: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 # Gemini API configuration
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')

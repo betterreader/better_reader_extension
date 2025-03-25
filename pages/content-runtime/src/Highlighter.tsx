@@ -1,40 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import './highlight-styles.css';
+import { CreateHighlightRequest, HighlightData, HighlightService, HighlightEvent } from '@extension/shared';
+import { getSupabaseClient } from '@extension/shared/lib/utils/supabaseClient';
+import { Session } from '@supabase/supabase-js';
 
 interface SerializedRange {
   startXPath: string;
   startOffset: number;
   endXPath: string;
   endOffset: number;
-}
-
-interface HighlightEvent {
-  type: 'HIGHLIGHT_TEXT';
-  color: string;
-  selection: {
-    text: string;
-    range: {
-      startOffset: number;
-      endOffset: number;
-      startContainer: Node;
-      endContainer: Node;
-    };
-  };
-}
-
-interface HighlightData {
-  id: string;
-  color: string;
-  text: string;
-  timestamp: number;
-  range: SerializedRange;
-  comment?: string;
-}
-
-interface StorageData {
-  [url: string]: {
-    highlights: { [key: string]: HighlightData };
-  };
 }
 
 const getXPath = (node: Node): string => {
@@ -104,18 +78,26 @@ const getTextNodeFromXPath = (xpath: string, offset: number): { node: Text; offs
   return getEffectiveTextNode(node, offset);
 };
 
-const storage = {
-  async get(key: string): Promise<StorageData> {
-    return new Promise(resolve => {
-      chrome.storage.local.get(key, result => resolve(result as StorageData));
-    });
-  },
-  async set(items: StorageData): Promise<void> {
-    return new Promise<void>(resolve => {
-      chrome.storage.local.set(items, () => resolve());
-    });
-  },
-};
+// Helper function to compare xpaths positions in the document
+function compareXPaths(xpath1: string, xpath2: string): number {
+  const node1 = document.evaluate(xpath1, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+  const node2 = document.evaluate(xpath2, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+  if (!node1 || !node2) return 0;
+
+  // compareDocumentPosition returns a bitmask
+  const position = node1.compareDocumentPosition(node2);
+
+  // Node.DOCUMENT_POSITION_FOLLOWING (4) means node2 follows node1
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+    return -1; // node1 comes first
+  }
+  // Node.DOCUMENT_POSITION_PRECEDING (2) means node2 precedes node1
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+    return 1; // node2 comes first
+  }
+  return 0;
+}
 
 export const Highlighter: React.FC = () => {
   console.log('Rendering content-runtime');
@@ -217,26 +199,6 @@ export const Highlighter: React.FC = () => {
     }
   };
 
-  const saveHighlight = async (highlight: HighlightData) => {
-    console.log('Attempting to save highlight:', highlight);
-    try {
-      const result = await storage.get(currentUrl);
-      console.log('Current stored highlights:', result);
-      const currentHighlights = (result[currentUrl] && result[currentUrl].highlights) || {};
-      await storage.set({
-        [currentUrl]: {
-          highlights: {
-            ...currentHighlights,
-            [highlight.id]: highlight,
-          },
-        },
-      });
-      console.log('Successfully saved highlight:', highlight);
-    } catch (e) {
-      console.error('Save highlight error:', e);
-    }
-  };
-
   const handleNewHighlight = async (event: Event) => {
     const customEvent = event as CustomEvent<HighlightEvent>;
     const { color, selection } = customEvent.detail;
@@ -249,18 +211,31 @@ export const Highlighter: React.FC = () => {
       endXPath: getXPath(selection.range.endContainer),
       endOffset: selection.range.endOffset,
     };
+    const start_xpath = getXPath(selection.range.startContainer);
+    const start_offset = selection.range.startOffset;
+    const end_xpath = getXPath(selection.range.endContainer);
+    const end_offset = selection.range.endOffset;
 
-    const highlightData: HighlightData = {
-      id,
+    const highlightData: CreateHighlightRequest = {
       color,
+      start_offset,
+      end_offset,
+      start_xpath,
+      end_xpath,
       text: selection.text,
-      timestamp: Date.now(),
-      range: serializedRange,
+      url: currentUrl,
+      comment: '',
+      local_id: id,
+      article_title: document.title,
     };
-
     if (highlightRange(serializedRange, color, id)) {
-      highlightsRef.current[id] = highlightData;
-      await saveHighlight(highlightData);
+      // Instead of saving highlights, we can just dispatch a new event to the side panel
+      // await saveHighlight(highlightData);
+      chrome.runtime.sendMessage({
+        type: 'HIGHLIGHT_TEXT_RUNTIME',
+        ...highlightData,
+      });
+      console.log('Content-Runtime: Successfully sent highlight event:', event);
     }
   };
 
@@ -287,45 +262,103 @@ export const Highlighter: React.FC = () => {
   };
 
   const loadHighlights = async () => {
-    console.log('Starting to load highlights for URL:', currentUrl);
-    try {
-      const result = await storage.get(currentUrl);
-      console.log('Retrieved stored highlights:', result);
-      const storedHighlights = (result[currentUrl] && result[currentUrl].highlights) || {};
-      console.log('Processing stored highlights:', storedHighlights);
-
-      Object.values(storedHighlights).forEach(highlight => {
-        console.log('Applying highlight:', highlight);
-        highlightRange(highlight.range, highlight.color, highlight.id);
-        highlightsRef.current[highlight.id] = highlight;
-      });
-      console.log('Highlights loaded and applied.');
-    } catch (e) {
-      console.error('Failed to load highlights:', e);
+    console.log('Content-Runtime: Starting to load highlights for URL:', currentUrl);
+    if (!session || !session.access_token) {
+      console.error('Content-Runtime: No session found in storage for loading highlights');
+      return;
     }
+    const { data, error } = await supabase
+      .from('highlight')
+      .select()
+      .eq('url', currentUrl)
+      .eq('user_id', session.user.id)
+      .select();
+    if (error) {
+      console.error('Error loading highlights:', error);
+      return;
+    }
+    console.log('Content-Runtime: Retrieved highlights:', data);
+
+    Object.values(data).forEach(highlight => {
+      console.log('Applying highlight:', highlight);
+      const serializedRange: SerializedRange = {
+        startXPath: highlight.start_xpath,
+        startOffset: highlight.start_offset,
+        endXPath: highlight.end_xpath,
+        endOffset: highlight.end_offset,
+      };
+      highlightRange(serializedRange, highlight.color, highlight.local_id);
+      highlightsRef.current[highlight.local_id] = highlight;
+    });
+    console.log('Highlights loaded and applied.');
   };
 
+  const [session, setSession] = useState<Session | null>(null);
+  const supabase = getSupabaseClient();
+
+  async function getSessionFromStorage() {
+    try {
+      const { session } = (await chrome.storage.local.get('session')) as { session: Session | null };
+      if (session) {
+        const { error: supaAuthError } = await supabase.auth.setSession(session);
+        if (supaAuthError) {
+          setSession(null);
+          throw supaAuthError;
+        }
+        console.log('Content-Runtime: Getting session from storage', session);
+        setSession(session);
+      }
+    } catch (error) {
+      console.error('Error getting session:', error);
+      setSession(null);
+    }
+  }
+
+  // Get session on mount
   useEffect(() => {
-    console.log('Initializing Highlighter component');
+    getSessionFromStorage();
+  }, []);
+
+  // Initialize event listeners and load highlights only after a valid session is available
+  useEffect(() => {
+    if (!session || !session.access_token) {
+      console.error('Content-Runtime: No valid session available yet.');
+      return;
+    }
+
+    console.log('Initializing Highlighter component with valid session');
     window.addEventListener('HIGHLIGHT_TEXT', handleNewHighlight);
-    loadHighlights();
 
     const messageListener = (message: any) => {
       if (message.type === 'DELETE_HIGHLIGHT') {
-        handleDeleteHighlight(message.highlightId);
+        console.log('Content-Runtime: Received delete highlight message:', message);
+        handleDeleteHighlight(message.local_id);
       } else if (message.type === 'SCROLL_TO_HIGHLIGHT') {
-        handleScrollToHighlight(message.highlightId);
+        console.log('Content-Runtime: Received scroll to highlight message:', message);
+        handleScrollToHighlight(message.local_id);
+      } else if (message.type === 'SESSION_UPDATED' && 'session' in message) {
+        supabase.auth
+          .setSession(message.session)
+          .then(({ data: { session } }) => {
+            setSession(session);
+          })
+          .catch(error => {
+            console.error('Error setting session:', error);
+          });
       }
     };
 
     chrome.runtime.onMessage.addListener(messageListener);
+
+    // Load highlights now that we have a session
+    loadHighlights();
 
     return () => {
       console.log('Cleaning up Highlighter component');
       window.removeEventListener('HIGHLIGHT_TEXT', handleNewHighlight);
       chrome.runtime.onMessage.removeListener(messageListener);
     };
-  }, []);
+  }, [session]);
 
   return null;
 };

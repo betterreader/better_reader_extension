@@ -39,7 +39,7 @@ const manifest = {
   version: packageJson.version,
   description: '__MSG_extensionDescription__',
   host_permissions: ['<all_urls>'],
-  permissions: ['storage', 'scripting', 'tabs', 'notifications', 'sidePanel', 'contextMenus', 'identity'],
+  permissions: ['storage', 'scripting', 'tabs', 'activeTab', 'notifications', 'sidePanel', 'contextMenus', 'identity'],
   oauth2: {
     client_id: google_client_id,
     scopes: ['openid', 'email', 'profile'],

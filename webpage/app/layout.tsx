@@ -24,25 +24,27 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={geistSans.className} suppressHydrationWarning>
-      <body className="bg-background text-foreground">
+    <html lang="en" className={`${geistSans.className} h-screen overflow-hidden`} suppressHydrationWarning>
+      <body className="bg-background text-foreground h-screen overflow-hidden">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <main className="min-h-screen flex flex-col items-center">
-            <div className="flex-1 w-full flex flex-col gap-20 items-center">
+          <main className="h-full flex flex-col items-center overflow-hidden">
+            <div className="flex-1 w-full flex flex-col gap-20 items-center overflow-hidden">
               <nav className="w-full flex justify-start border-b border-b-foreground/10 h-16">
                 <div className="w-full max-w-5xl flex items-center p-3 px-5 text-sm">
                   <HeaderAuth />
                 </div>
               </nav>
-              <div className="flex flex-col gap-20 max-w-5xl p-5">{children}</div>
+
+              {/* Children should now handle their own scrolling */}
+              <div className="flex flex-col gap-20 max-w-5xl p-5 w-full h-full overflow-hidden">{children}</div>
 
               <footer className="w-full flex items-center justify-center border-t mx-auto text-center text-xs gap-8 py-16">
                 <p>
                   Built with ❤️ by{' '}
                   <a href="https://github.com/mountaint0p" target="_blank" className="font-bold hover:underline">
-                    Summit
+                    Summit{' '}
                   </a>
-                  and
+                  and{' '}
                   <a href="https://github.com/ananyakgarg" target="_blank" className="font-bold hover:underline">
                     Ananya
                   </a>

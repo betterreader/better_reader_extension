@@ -62,7 +62,8 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ articleData, apiBaseUrl, them
   };
 
   return (
-    <div className={`h-full flex flex-col p-4 ${theme === 'light' ? 'bg-white' : 'bg-[#1E1E1E]'}`}>
+    <div
+      className={`h-[calc(100vh-220px)] overflow-y-auto flex flex-col p-4 ${theme === 'light' ? 'bg-white' : 'bg-[#1E1E1E]'}`}>
       <div className="mb-4 space-y-3">
         <div>
           <textarea
