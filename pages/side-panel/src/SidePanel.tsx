@@ -71,9 +71,6 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
       ]);
       setCurrentQuizData(null);
       setQuestionStates([]);
-
-      // Reset active tab to chat
-      setActiveTab('chat');
     };
 
     const fetchArticleContent = () => {
@@ -104,7 +101,6 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
     };
     chrome.tabs.onUpdated.addListener(tabUpdateListener);
 
-    // Listen for tab switches to fetch new content
     // Listen for tab switches to fetch new content
     const tabSwitchListener = (activeInfo: chrome.tabs.TabActiveInfo) => {
       console.log('SidePanel: Tab switch detected, fetching new content');

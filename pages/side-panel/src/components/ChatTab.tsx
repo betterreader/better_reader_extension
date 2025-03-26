@@ -293,7 +293,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-[calc(100vh-220px)]">
         {messages.map((msg, index) => (
           <div
             key={index}
