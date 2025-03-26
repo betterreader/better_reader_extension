@@ -139,10 +139,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
 
   return (
     // Changed fixed width and height to fluid classes
-    <div
-      className={`w-full h-screen rounded-t-lg overflow-hidden flex flex-col ${
-        theme === 'light' ? 'bg-white' : 'bg-[#1E1E1E]'
-      }`}>
+    <div className={`w-full h-screen rounded-t-lg flex flex-col ${theme === 'light' ? 'bg-white' : 'bg-[#1E1E1E]'}`}>
       <header
         className={`flex flex-col p-4 ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'}`}>
         <div className="flex justify-between items-center">
@@ -226,7 +223,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
           Research
         </div>
       </div>
-      <div className="flex-1">
+      <div className="flex-1 overflow-hidden min-h-0">
         <div className={`h-full ${activeTab !== 'chat' ? 'hidden' : ''}`}>
           <ChatTab
             key={articleData?.url || 'no-article'}

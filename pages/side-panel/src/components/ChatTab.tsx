@@ -393,8 +393,8 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-[calc(100vh-220px)]">
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
         {messages.map((msg, index) => (
           <div
             key={index}
@@ -462,8 +462,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
             {useEnhancedChat ? 'Enhanced Mode (All Articles)' : 'Regular Mode (Current Article)'}
           </button>
         </div>
-
-        <div className="flex items-end gap-2">
+        <div className="flex items-center gap-2">
           <textarea
             className={`w-full p-2 border rounded-lg resize-none ${
               theme === 'dark' ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-gray-800 border-gray-300'

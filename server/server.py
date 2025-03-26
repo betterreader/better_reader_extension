@@ -1875,6 +1875,253 @@ def enhanced_chat():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/generate-quiz', methods=['POST'])
+def generate_quiz():
+    print("Received quiz generation request")
+    try:
+        data = request.json
+        
+        if not data:
+            print("No data received")
+            return jsonify({'error': 'No data received'}), 400
+        
+        print(f"Request data: {data.keys()}")
+        
+        if 'articleContent' not in data:
+            print("Missing articleContent parameter")
+            return jsonify({'error': 'Missing article content'}), 400
+        
+        article_content = data['articleContent']
+        article_title = data.get('articleTitle', '')
+        custom_prompt = data.get('customPrompt', '')
+        client_timestamp = data.get('timestamp', '')
+        user_level = data.get('userLevel', '')
+        
+        # Add timestamp to encourage different questions each time
+        import datetime
+        import random
+        import uuid
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        random_seed = random.randint(1, 1000000)
+        unique_id = str(uuid.uuid4())
+        
+        print(f"Processing quiz generation request for article '{article_title}'")
+        print(f"Article content length: {len(article_content)}")
+        print(f"Custom prompt: {custom_prompt}")
+        print(f"User level: {user_level}")
+        print(f"Client timestamp: {client_timestamp}")
+        print(f"Request time: {current_time}")
+        print(f"Random seed: {random_seed}")
+        print(f"Unique ID: {unique_id}")
+        
+        # Adjust difficulty based on user level
+        difficulty_instruction = ""
+        if user_level == 'beginner':
+            difficulty_instruction = """
+            Since the user is a BEGINNER in this topic:
+            - Focus on fundamental concepts and basic information from the article
+            - Use simple, clear language in both questions and answer choices
+            - Avoid complex terminology without explanation
+            - Include more straightforward questions that test basic understanding
+            - Make distractors (wrong answers) clearly distinguishable from correct answers
+            """
+        elif user_level == 'intermediate':
+            difficulty_instruction = """
+            Since the user has INTERMEDIATE knowledge of this topic:
+            - Balance between fundamental concepts and more nuanced details
+            - Include some questions that require connecting multiple concepts
+            - Use moderate domain-specific terminology where appropriate
+            - Create questions that test both recall and application of concepts
+            - Make distractors (wrong answers) plausible but distinguishable
+            """
+        elif user_level == 'expert':
+            difficulty_instruction = """
+            Since the user has EXPERT knowledge of this topic:
+            - Focus on nuanced details, advanced concepts, and deeper implications
+            - Include questions that require synthesis of multiple concepts
+            - Don't shy away from domain-specific terminology and advanced concepts
+            - Create challenging questions that test deep understanding and critical thinking
+            - Make distractors (wrong answers) sophisticated and plausible
+            """
+        
+        # Create prompt for quiz generation
+        if custom_prompt:
+            base_prompt = f"""
+            You are an educational assistant that creates tailored quiz questions to help users test their understanding of articles they're reading.
+
+            ARTICLE CONTENT:
+            {article_content[:4000]}
+
+            USER REQUEST:
+            {custom_prompt}
+
+            USER KNOWLEDGE LEVEL:
+            {user_level}
+
+            CURRENT TIME: {current_time}
+            UNIQUE ID: {unique_id}
+            CLIENT TIMESTAMP: {client_timestamp}
+
+            TASK:
+            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request and knowledge level.
+
+            {difficulty_instruction}
+
+            INSTRUCTIONS:
+            1. Analyze the user's request to understand what types of questions they want (e.g., about specific topics, concepts, or sections of the article).
+            2. Generate 3-5 multiple-choice questions that align with the user's request while covering important content from the article.
+            3. If the user hasn't specified question types, focus on the most important concepts and key takeaways.
+            4. Each question should have 4 answer options with exactly one correct answer.
+            5. Ensure questions are directly answerable from the article content.
+            6. Do not create questions about information not present in the article.
+            7. IMPORTANT: Generate unique and diverse questions each time. Do not repeat questions from previous requests.
+            8. Format your response as a valid JSON object with the following structure:
+
+            {{
+              "questions": [
+                {{
+                  "question": "Question text goes here?",
+                  "options": [
+                    "Option A",
+                    "Option B",
+                    "Option C",
+                    "Option D"
+                  ],
+                  "correctAnswer": 0,
+                  "explanation": "Brief explanation of why this answer is correct"
+                }},
+                ...
+              ]
+            }}
+
+            The "correctAnswer" field should be the zero-based index of the correct option (0 for first option, 1 for second, etc.).
+            Ensure your response is properly formatted JSON that can be parsed by JavaScript's JSON.parse() function.
+
+            If the user's request cannot be fulfilled based on the article content, respond with a friendly message explaining why and offer to generate general questions about the article instead.
+            """
+        else:
+            base_prompt = f"""
+            You are an educational assistant that creates tailored quiz questions to help users test their understanding of articles they're reading.
+
+            ARTICLE CONTENT:
+            {article_content[:4000]}
+
+            USER REQUEST:
+            Generate quiz questions about the main concepts and key points from this article.
+
+            USER KNOWLEDGE LEVEL:
+            {user_level}
+
+            CURRENT TIME: {current_time}
+            UNIQUE ID: {unique_id}
+            CLIENT TIMESTAMP: {client_timestamp}
+
+            TASK:
+            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request and knowledge level.
+
+            {difficulty_instruction}
+
+            INSTRUCTIONS:
+            1. Analyze the user's request to understand what types of questions they want (e.g., about specific topics, concepts, or sections of the article).
+            2. Generate 3-5 multiple-choice questions that align with the user's request while covering important content from the article.
+            3. If the user hasn't specified question types, focus on the most important concepts and key takeaways.
+            4. Each question should have 4 answer options with exactly one correct answer.
+            5. Ensure questions are directly answerable from the article content.
+            6. Do not create questions about information not present in the article.
+            7. IMPORTANT: Generate unique and diverse questions each time. Do not repeat questions from previous requests.
+            8. Format your response as a valid JSON object with the following structure:
+
+            {{
+              "questions": [
+                {{
+                  "question": "Question text goes here?",
+                  "options": [
+                    "Option A",
+                    "Option B",
+                    "Option C",
+                    "Option D"
+                  ],
+                  "correctAnswer": 0,
+                  "explanation": "Brief explanation of why this answer is correct"
+                }},
+                ...
+              ]
+            }}
+
+            The "correctAnswer" field should be the zero-based index of the correct option (0 for first option, 1 for second, etc.).
+            Ensure your response is properly formatted JSON that can be parsed by JavaScript's JSON.parse() function.
+
+            If the user's request cannot be fulfilled based on the article content, respond with a friendly message explaining why and offer to generate general questions about the article instead.
+            """
+        
+        # Prepare request to Gemini API
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": base_prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.9,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 1024,
+                "seed": random_seed
+            }
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            print("Sending request to Gemini API")
+            response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+            response_data = response.json()
+            
+            print(f"Received response from Gemini API: {response.status_code}")
+            
+            if 'candidates' in response_data and len(response_data['candidates']) > 0:
+                generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
+                
+                # Extract JSON from the response
+                try:
+                    # Find JSON in the response (it might be wrapped in markdown code blocks)
+                    json_str = generated_text
+                    if "```json" in generated_text:
+                        json_str = generated_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in generated_text:
+                        json_str = generated_text.split("```")[1].split("```")[0].strip()
+                    
+                    quiz_data = json.loads(json_str)
+                    print("Successfully parsed JSON response")
+                    return jsonify(quiz_data)
+                except json.JSONDecodeError as e:
+                    print(f"JSON parsing error: {str(e)}")
+                    # If JSON parsing fails, return an error
+                    return jsonify({
+                        'error': 'Failed to parse quiz data',
+                        'rawResponse': generated_text
+                    }), 500
+            else:
+                error_message = response_data.get('error', {}).get('message', 'Unknown error')
+                print(f"Failed to generate response: {error_message}")
+                return jsonify({'error': 'Failed to generate quiz', 'details': error_message}), 500
+        
+        except Exception as e:
+            print(f"Exception occurred in generate_quiz: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
+    
+    except Exception as e:
+        print(f"Exception occurred in generate_quiz: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print(f"Starting server on port {PORT}...")
     app.run(debug=True, host='0.0.0.0', port=PORT)
