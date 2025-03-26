@@ -15,6 +15,12 @@ from functools import wraps
 import openai
 from flask import g
 import atexit
+import multiprocessing
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from sklearn.feature_extraction.text import TfidfVectorizer
+from collections import Counter
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +39,37 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # Configure OpenAI API
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 openai.api_key = OPENAI_API_KEY
+
+# Initialize session for requests
+session = requests.Session()
+
+# Download NLTK resources
+try:
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('stopwords')
+
+# Enhanced cleanup function to prevent semaphore leaks
+def cleanup_resources():
+    try:
+        print("Cleaning up resources")
+        # Close the requests session
+        session.close()
+        
+        # Clean up any multiprocessing resources (which can cause semaphore leaks)
+        # Force cleanup of any remaining multiprocessing resources
+        if hasattr(multiprocessing, 'resource_tracker'):
+            try:
+                multiprocessing.resource_tracker._resource_tracker.clear()
+            except:
+                pass
+    except Exception as e:
+        print(f"Error during cleanup: {str(e)}")
+
+# Register cleanup function for the session
+atexit.register(cleanup_resources)
 
 # NOTE: These supabase functions aren't being used at the moment
 def require_supabase_user(f):
@@ -109,8 +146,8 @@ def get_highlights():
         user_id = g.user.id
         result = supabase.table('highlight')\
             .select('*')\
-            .eq('user_id', user_id)\
-            .eq('url', url)\
+            .filter('user_id', 'eq', user_id)\
+            .filter('url', 'eq', url)\
             .execute()
             
         return jsonify(result.data)
@@ -126,8 +163,8 @@ def delete_highlight(highlight_id):
         user_id = g.user.id
         result = supabase.table('highlight')\
             .delete()\
-            .eq('id', highlight_id)\
-            .eq('user_id', user_id)\
+            .filter('id', 'eq', highlight_id)\
+            .filter('user_id', 'eq', user_id)\
             .execute()
             
         return jsonify({'success': True})
@@ -150,8 +187,8 @@ def update_highlight(highlight_id):
         user_id = g.user.id
         result = supabase.table('highlight')\
             .update(update_data)\
-            .eq('id', highlight_id)\
-            .eq('user_id', user_id)\
+            .filter('id', 'eq', highlight_id)\
+            .filter('user_id', 'eq', user_id)\
             .execute()
             
         return jsonify(result.data[0])
@@ -172,18 +209,84 @@ PERPLEXITY_HEADERS = {
     "Content-Type": "application/json"
 }
 
-# Create a session for requests to avoid semaphore leaks
-session = requests.Session()
-
-# Register cleanup function to close session on shutdown
-def cleanup_resources():
-    session.close()
-    print("Cleaned up resources")
-
-atexit.register(cleanup_resources)
-
 # Text segmentation and embedding utilities
-def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> List[str]:
+def extract_keywords(text: str, top_n: int = 10) -> List[str]:
+    """
+    Extract the most important keywords from text using TF-IDF.
+    
+    Args:
+        text: The text to extract keywords from
+        top_n: Number of top keywords to return
+        
+    Returns:
+        List of top keywords
+    """
+    try:
+        # Tokenize and remove stopwords
+        stop_words = set(stopwords.words('english'))
+        tokens = word_tokenize(text.lower())
+        filtered_tokens = [w for w in tokens if w.isalnum() and w not in stop_words and len(w) > 2]
+        
+        # If we don't have enough tokens, return what we have
+        if len(filtered_tokens) < 3:
+            return filtered_tokens[:top_n]
+        
+        # Use TF-IDF to find important terms
+        vectorizer = TfidfVectorizer(max_features=50)
+        tfidf_matrix = vectorizer.fit_transform([' '.join(filtered_tokens)])
+        
+        # Get feature names and scores
+        feature_names = vectorizer.get_feature_names_out()
+        scores = tfidf_matrix.toarray()[0]
+        
+        # Sort by score and get top keywords
+        keyword_scores = [(feature_names[i], scores[i]) for i in range(len(feature_names))]
+        keyword_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        return [keyword for keyword, _ in keyword_scores[:top_n]]
+    except Exception as e:
+        print(f"Error extracting keywords: {str(e)}")
+        return []
+
+def calculate_importance_score(segment: str) -> float:
+    """
+    Calculate an importance score for a segment based on various heuristics.
+    
+    Args:
+        segment: The text segment to score
+        
+    Returns:
+        Importance score between 0.0 and 2.0
+    """
+    score = 1.0  # Default score
+    
+    # Length-based scoring (longer segments might contain more information)
+    words = segment.split()
+    if len(words) > 100:
+        score += 0.2
+    elif len(words) < 30:
+        score -= 0.1
+    
+    # Presence of key phrases that might indicate important content
+    importance_indicators = [
+        "in conclusion", "to summarize", "key finding", "important", 
+        "significant", "result shows", "we found", "demonstrates",
+        "this means", "in other words", "specifically", "notably"
+    ]
+    
+    for indicator in importance_indicators:
+        if indicator in segment.lower():
+            score += 0.1
+            break
+    
+    # Presence of numerical data often indicates important facts
+    if any(c.isdigit() for c in segment):
+        score += 0.1
+    
+    # Normalize to ensure we don't exceed 2.0
+    return min(2.0, max(0.5, score))
+
+def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> List[Dict[str, Any]]:
     """
     Segment article text into overlapping chunks for embedding.
     
@@ -193,34 +296,57 @@ def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> L
         overlap: Number of characters to overlap between chunks
         
     Returns:
-        List of text segments
+        List of dictionaries containing segment text and metadata
     """
-    # Clean the text
-    text = re.sub(r'\s+', ' ', text).strip()
+    # Clean up the text
+    text = text.replace('\n\n', ' ').replace('\n', ' ').replace('  ', ' ')
     
-    # If text is shorter than max_chunk_size, return it as is
-    if len(text) <= max_chunk_size:
-        return [text]
-    
+    # Initialize segments
     segments = []
-    start = 0
     
+    # If text is shorter than max_chunk_size, return it as a single segment
+    if len(text) <= max_chunk_size:
+        segment_text = text.strip()
+        keywords = extract_keywords(segment_text)
+        importance = calculate_importance_score(segment_text)
+        
+        segments.append({
+            'text': segment_text,
+            'keywords': keywords,
+            'importance_score': importance
+        })
+        return segments
+    
+    # Otherwise, segment the text with overlap
+    start = 0
     while start < len(text):
-        # Get chunk of max_chunk_size
-        end = start + max_chunk_size
+        # Get the chunk
+        end = min(start + max_chunk_size, len(text))
         
-        # If we're not at the end of the text, try to find a sentence break
+        # If this is not the last chunk, try to find a natural break point
         if end < len(text):
-            # Look for a sentence break (period followed by space)
-            sentence_break = text.rfind('. ', start, end)
-            if sentence_break != -1:
-                end = sentence_break + 1  # Include the period
+            # Look for the last period, question mark, or exclamation point
+            for i in range(min(end + 100, len(text)), max(start + 200, end - 200), -1):
+                if i < len(text) and text[i] in '.!?':
+                    end = i + 1
+                    break
         
-        # Add the segment
-        segments.append(text[start:end].strip())
+        # Extract the segment
+        segment_text = text[start:end].strip()
         
-        # Move the start position, accounting for overlap
-        start = end - overlap if end < len(text) else end
+        # Extract keywords and calculate importance
+        keywords = extract_keywords(segment_text)
+        importance = calculate_importance_score(segment_text)
+        
+        # Add to segments
+        segments.append({
+            'text': segment_text,
+            'keywords': keywords,
+            'importance_score': importance
+        })
+        
+        # Move the start pointer for the next segment
+        start = end - overlap
     
     return segments
 
@@ -247,7 +373,7 @@ def generate_embedding(text: str) -> List[float]:
 def store_article_embeddings(
     url: str, 
     title: str, 
-    segments: List[str], 
+    segments: List[Dict[str, Any]], 
     embeddings: List[List[float]],
     user_id: Optional[str] = None
 ) -> bool:
@@ -257,7 +383,7 @@ def store_article_embeddings(
     Args:
         url: The URL of the article
         title: The title of the article
-        segments: List of text segments
+        segments: List of segment dictionaries with text and metadata
         embeddings: List of embedding vectors
         user_id: Optional user ID
         
@@ -265,41 +391,59 @@ def store_article_embeddings(
         Success status
     """
     try:
+        # Extract all keywords from segments to determine article topics
+        all_keywords = []
+        for segment in segments:
+            all_keywords.extend(segment['keywords'])
+        
+        # Count keyword frequency and get top topics
+        keyword_counts = Counter(all_keywords)
+        topics = [keyword for keyword, count in keyword_counts.most_common(10)]
+        
+        # Generate a UUID for the article
         article_id = str(uuid.uuid4())
+        
+        # Insert article record
         article_data = {
             'id': article_id,
             'url': url,
             'title': title,
             'user_id': user_id,
-            'created_at': datetime.datetime.now().isoformat()
+            'topics': topics
         }
         
-        # Insert article metadata
-        print(f"Inserting article with ID: {article_id}")
         supabase.table('articles').insert(article_data).execute()
         
-        # Insert segments and embeddings
+        # Insert segment records
+        segment_records = []
         for i, (segment, embedding) in enumerate(zip(segments, embeddings)):
-            segment_data = {
-                'id': str(uuid.uuid4()),
+            segment_id = str(uuid.uuid4())
+            segment_records.append({
+                'id': segment_id,
                 'article_id': article_id,
-                'segment_text': segment,
+                'segment_text': segment['text'],
                 'embedding': embedding,
-                'segment_index': i
-            }
-            supabase.table('article_segments').insert(segment_data).execute()
+                'segment_index': i,
+                'keywords': segment['keywords'],
+                'importance_score': segment['importance_score']
+            })
+        
+        # Insert in batches to avoid request size limits
+        batch_size = 10
+        for i in range(0, len(segment_records), batch_size):
+            batch = segment_records[i:i+batch_size]
+            supabase.table('article_segments').insert(batch).execute()
         
         return True
     except Exception as e:
-        print(f"Error storing article embeddings: {str(e)}", flush=True)
-        import traceback
-        traceback.print_exc()
+        print(f"Error storing article embeddings: {str(e)}")
         return False
 
 def vector_search(
     query: str, 
     limit: int = 5, 
-    article_id: Optional[str] = None
+    article_id: Optional[str] = None,
+    current_article_topics: Optional[List[str]] = None
 ) -> List[Dict[str, Any]]:
     """
     Perform a vector search using the query embedding.
@@ -307,7 +451,8 @@ def vector_search(
     Args:
         query: The search query
         limit: Maximum number of results to return
-        article_id: Optional article ID to filter results
+        article_id: Optional article ID (can be UUID or URL) to filter results
+        current_article_topics: Optional list of topics from the current article for thematic filtering
         
     Returns:
         List of matching segments with similarity scores
@@ -316,20 +461,104 @@ def vector_search(
         # Generate embedding for the query
         query_embedding = generate_embedding(query)
         
-        # Build the search query
-        search_query = supabase.table('article_segments')
+        # Extract keywords from the query for relevance matching
+        query_keywords = extract_keywords(query)
+        print(f"Query keywords: {query_keywords}")
         
+        # Prepare parameters for the RPC call
+        params = {
+            "query_embedding": query_embedding,
+            "match_threshold": 0.0,  # We'll filter results later
+            "match_limit": limit * 3  # Get more results to filter
+        }
+        
+        # If article ID is provided, we need to handle it
         if article_id:
-            search_query = search_query.eq('article_id', article_id)
+            # Check if article_id is a URL rather than a UUID
+            if article_id.startswith('http'):
+                # Look up the article UUID by URL
+                article_lookup = supabase.table('articles').select('id').filter('url', 'eq', article_id).execute()
+                
+                if article_lookup.data and len(article_lookup.data) > 0:
+                    # Get the actual UUID
+                    article_uuid = article_lookup.data[0]['id']
+                    params["article_filter"] = article_uuid
+                else:
+                    # If article not found, return empty results
+                    print(f"Article with URL {article_id} not found in database")
+                    return []
+            else:
+                # Assume it's already a UUID
+                params["article_filter"] = article_id
+                
+            # Perform search with article filter
+            rpc_response = supabase.rpc(
+                "match_article_segments", 
+                params
+            ).execute()
+        else:
+            # Perform search across all articles
+            rpc_response = supabase.rpc(
+                "match_segments", 
+                params
+            ).execute()
         
-        # Execute the vector search
-        # Note: This uses pgvector's '<->' operator for cosine distance
-        result = search_query.select('*, articles!inner(*)').\
-            order('embedding <-> $1', query_embedding).\
-            limit(limit).\
-            execute()
-        
-        return result.data
+        # Process the results
+        results = []
+        if rpc_response.data:
+            for item in rpc_response.data:
+                # Get the article ID for this segment
+                article_id = item['article_id']
+                
+                # Get article metadata including topics
+                article_data = supabase.table('articles').select('title, url, topics, created_at').filter('id', 'eq', article_id).execute()
+                
+                article_topics = []
+                if article_data.data and len(article_data.data) > 0 and article_data.data[0].get('topics'):
+                    article_topics = article_data.data[0]['topics']
+                
+                # Calculate topic overlap with current article if provided
+                topic_overlap_score = 0.0
+                if current_article_topics and article_topics:
+                    common_topics = set(current_article_topics).intersection(set(article_topics))
+                    topic_overlap_score = len(common_topics) / max(len(current_article_topics), 1) * 0.3
+                
+                # Calculate keyword relevance score
+                segment_keywords = item.get('keywords', [])
+                keyword_match_score = 0.0
+                if segment_keywords and query_keywords:
+                    common_keywords = set(query_keywords).intersection(set(segment_keywords))
+                    keyword_match_score = len(common_keywords) / max(len(query_keywords), 1) * 0.3
+                
+                # Get importance score
+                importance_score = item.get('importance_score', 1.0)
+                
+                # Calculate combined relevance score
+                base_similarity = item['similarity']
+                combined_score = base_similarity + topic_overlap_score + keyword_match_score
+                
+                # Apply importance multiplier (max 30% boost)
+                combined_score = combined_score * (1 + (importance_score - 1) * 0.3)
+                
+                # Add to results
+                results.append({
+                    'segment_text': item['segment_text'],
+                    'article_id': article_id,
+                    'similarity': base_similarity,
+                    'combined_score': combined_score,
+                    'keywords': segment_keywords,
+                    'importance_score': importance_score,
+                    'topic_overlap': topic_overlap_score,
+                    'keyword_match': keyword_match_score
+                })
+            
+            # Sort by combined score
+            results.sort(key=lambda x: x['combined_score'], reverse=True)
+            
+            # Return top results
+            return results[:limit]
+        else:
+            return []
     except Exception as e:
         print(f"Error in vector search: {str(e)}")
         return []
@@ -350,22 +579,19 @@ def process_article():
     try:
         data = request.json
         
-        if not data:
-            return jsonify({'error': 'No data received'}), 400
+        if not data or 'content' not in data or 'url' not in data:
+            return jsonify({'error': 'Missing required parameters'}), 400
         
-        if 'content' not in data or 'url' not in data:
-            return jsonify({'error': 'Missing required fields'}), 400
-        
+        content = data['content']
         url = data['url']
         title = data.get('title', 'Untitled Article')
-        content = data['content']
         user_id = data.get('user_id')
         
         # Segment the article text
         segments = segment_text(content)
         
         # Generate embeddings for each segment
-        embeddings = [generate_embedding(segment) for segment in segments]
+        embeddings = [generate_embedding(segment['text']) for segment in segments]
         
         # Store segments and embeddings
         success = store_article_embeddings(url, title, segments, embeddings, user_id)
@@ -523,7 +749,7 @@ def get_article_recommendations():
         # Get the article segments
         article_segments = supabase.table('article_segments')\
             .select('*')\
-            .eq('article_id', article_id)\
+            .filter('article_id', 'eq', article_id)\
             .execute()
         
         if not article_segments.data:
@@ -532,37 +758,44 @@ def get_article_recommendations():
         # Get a representative embedding (using the first segment as a simple approach)
         article_embedding = article_segments.data[0]['embedding']
         
-        # Find similar articles based on vector similarity
-        # This query finds articles that are not the current article but have similar content
-        similar_articles = supabase.table('article_segments')\
-            .select('articles!inner(id, url, title)')\
-            .not_('article_id', 'eq', article_id)\
-            .order('embedding <-> $1', article_embedding)\
-            .limit(limit)\
-            .execute()
+        # Create SQL function for finding similar articles if it doesn't exist yet
+        try:
+            # Use RPC to find similar articles
+            similar_articles = supabase.rpc(
+                "find_similar_articles",
+                {
+                    "article_embedding": article_embedding,
+                    "current_article_id": article_id,
+                    "match_limit": limit
+                }
+            ).execute()
+            
+            # Extract unique articles from the results
+            seen_article_ids = set()
+            recommendations = []
+            
+            for item in similar_articles.data:
+                article = item['articles']
+                if article['id'] not in seen_article_ids:
+                    seen_article_ids.add(article['id'])
+                    recommendations.append({
+                        'id': article['id'],
+                        'url': article['url'],
+                        'title': article['title']
+                    })
+                    
+                    if len(recommendations) >= limit:
+                        break
         
-        # Extract unique articles from the results
-        seen_article_ids = set()
-        recommendations = []
-        
-        for item in similar_articles.data:
-            article = item['articles']
-            if article['id'] not in seen_article_ids:
-                seen_article_ids.add(article['id'])
-                recommendations.append({
-                    'id': article['id'],
-                    'url': article['url'],
-                    'title': article['title']
-                })
-                
-                if len(recommendations) >= limit:
-                    break
-        
-        return jsonify({
-            'success': True,
-            'recommendations': recommendations
-        })
-        
+            return jsonify({
+                'success': True,
+                'recommendations': recommendations
+            })
+            
+        except Exception as e:
+            print(f"Error getting article recommendations: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
     except Exception as e:
         print(f"Error getting article recommendations: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -586,6 +819,7 @@ def chat():
     
     message = data['message']
     article_content = data['articleContent']
+    
     article_title = data.get('articleTitle', '')
     article_url = data.get('articleUrl', '')
     quiz_context = data.get('quizContext', '')
@@ -730,10 +964,6 @@ def chat():
                 error_message = response_data.get('error', {}).get('message', 'Unknown error')
                 print(f"Failed to generate response: {error_message}")
                 return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
-        else:
-            error_message = evaluation_data.get('error', {}).get('message', 'Unknown error')
-            print(f"Failed to evaluate question: {error_message}")
-            return jsonify({'error': 'Failed to evaluate question', 'details': error_message}), 500
     
     except Exception as e:
         print(f"Exception occurred: {str(e)}")
@@ -744,13 +974,9 @@ def analyze():
     print("Received analyze request")
     data = request.json
     
-    if not data:
+    if not data or 'articleContent' not in data:
         print("No data received")
         return jsonify({'error': 'No data received'}), 400
-    
-    if 'articleContent' not in data:
-        print("Missing articleContent parameter")
-        return jsonify({'error': 'Missing article content'}), 400
     
     article_content = data['articleContent']
     article_title = data.get('articleTitle', '')
@@ -809,7 +1035,7 @@ def analyze():
             "temperature": 0.7,
             "topK": 40,
             "topP": 0.95,
-            "maxOutputTokens": 1024
+            "maxOutputTokens": 256
         }
     })).json()
     
@@ -1184,6 +1410,469 @@ def generate_summary():
             
     except Exception as e:
         print(f"Error generating summary: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/enhanced_chat', methods=['POST'])
+def enhanced_chat():
+    """
+    Enhanced chat endpoint that supports:
+    1. Conversational queries across all articles
+    2. Tracking conversation history
+    3. Generating insights from reading history
+    
+    Request JSON:
+    {
+        "message": "User's question or message",
+        "conversation_id": "optional-conversation-id",
+        "conversation_history": [
+            {"role": "user", "content": "Previous user message"},
+            {"role": "assistant", "content": "Previous assistant response"}
+        ],
+        "articleUrl": "optional-current-article-url",
+        "articleContent": "optional-current-article-content",
+        "articleTitle": "optional-current-article-title"
+    }
+    """
+    print("Received enhanced chat request")
+    data = request.json
+    
+    if not data or 'message' not in data:
+        print("Missing required parameters")
+        return jsonify({'error': 'Message is required'}), 400
+    
+    message = data['message']
+    
+    article_content = data['articleContent']
+    article_title = data.get('articleTitle', '')
+    article_url = data.get('articleUrl', '')
+    quiz_context = data.get('quizContext', '')
+    conversation_id = data.get('conversation_id')
+    conversation_history = data.get('conversation_history', [])
+    
+    print(f"Enhanced chat request: '{message}'")
+    print(f"Conversation ID: {conversation_id}")
+    print(f"Current article URL: {article_url}")
+    
+    try:
+        # Step 1: Extract topics and keywords from the current article
+        current_article_topics = []
+        current_article_keywords = []
+        
+        if article_content:
+            # Process the current article content to extract topics
+            article_segments = segment_text(article_content)
+            all_keywords = []
+            for segment in article_segments:
+                all_keywords.extend(segment['keywords'])
+            
+            # Get top keywords as topics
+            keyword_counts = Counter(all_keywords)
+            current_article_topics = [keyword for keyword, count in keyword_counts.most_common(10)]
+            current_article_keywords = list(set(all_keywords))
+            
+            print(f"Current article topics: {current_article_topics}")
+        
+        # Step 2: Determine if user is asking about the current article
+        is_about_current_article = False
+        if message.lower().strip() in [
+            "what is this article about", 
+            "whats this article about", 
+            "what's this article about",
+            "what is this about",
+            "whats this about",
+            "what's this about",
+            "summarize this article",
+            "summarize this"
+        ]:
+            is_about_current_article = True
+            print("User is asking about the current article")
+        else:
+            # Check if the query contains keywords from the article
+            query_keywords = extract_keywords(message)
+            keyword_overlap = set(query_keywords).intersection(set(current_article_keywords))
+            if len(keyword_overlap) >= 2 or (len(query_keywords) > 0 and len(keyword_overlap) / len(query_keywords) > 0.5):
+                is_about_current_article = True
+                print(f"Query likely about current article based on keyword overlap: {keyword_overlap}")
+        
+        # Step 3: Retrieve relevant context using vector search
+        search_limit = 10  # Increased limit to have more candidates to filter from
+        min_similarity_threshold = 0.20  # Absolute minimum threshold
+        
+        # First, perform vector search across all articles (only if not specifically asking about current article)
+        search_results = []
+        if not is_about_current_article:
+            search_results = vector_search(
+                message, 
+                limit=search_limit, 
+                article_id=None,
+                current_article_topics=current_article_topics
+            )
+        
+        # Log similarity scores for debugging
+        if search_results:
+            print(f"Found {len(search_results)} search results with combined scores:")
+            scores = []
+            for idx, result in enumerate(search_results):
+                combined_score = result.get('combined_score', 0)
+                base_similarity = result.get('similarity', 0)
+                scores.append(combined_score)
+                print(f"  Result {idx+1}: Combined {combined_score:.4f} (Base: {base_similarity:.4f}, "
+                      f"Topic: {result.get('topic_overlap', 0):.2f}, Keyword: {result.get('keyword_match', 0):.2f}, "
+                      f"Importance: {result.get('importance_score', 1.0):.2f})")
+            
+            # Calculate dynamic threshold based on distribution
+            if scores:
+                avg_score = sum(scores) / len(scores)
+                max_score = max(scores)
+                
+                # Dynamic threshold: either 80% of max score or minimum threshold, whichever is higher
+                dynamic_threshold = max(0.8 * max_score, min_similarity_threshold)
+                
+                print(f"Using dynamic similarity threshold: {dynamic_threshold:.4f}")
+                print(f"Average combined score: {avg_score:.4f}, Max score: {max_score:.4f}")
+            else:
+                dynamic_threshold = min_similarity_threshold
+        
+        # If asking about current article or there are too few results, boost with current article content
+        current_article_context = ""
+        current_article_results = []
+        
+        if article_url and (is_about_current_article or len(search_results) < 2):
+            # Get specific context from the current article
+            current_article_results = vector_search(
+                message, 
+                limit=5,  # Get more context from current article
+                article_id=article_url
+            )
+            
+            print(f"Found {len(current_article_results)} results from current article")
+            
+            # Add this context to our results
+            if current_article_results:
+                current_article_context = "\n\n".join([
+                    f"From current article '{article_title}': {result['segment_text']}\n[{result['relevance_details']}]" 
+                    for result in current_article_results
+                ])
+        
+        # Combine all context and filter by similarity threshold
+        context_chunks = []
+        seen_article_ids = set()  # To track unique articles
+        seen_content_hashes = set()  # To detect similar content across different articles
+        
+        # If asking specifically about current article, only use current article results
+        results_to_process = current_article_results if is_about_current_article else search_results
+        
+        for result in results_to_process:
+            # Skip results below dynamic threshold (unless asking about current article)
+            if not is_about_current_article and 'combined_score' in result and result['combined_score'] < dynamic_threshold:
+                print(f"Skipping result with low combined score: {result['combined_score']:.4f} (below threshold {dynamic_threshold:.4f})")
+                continue
+                
+            article_id = result['article_id']
+            
+            # Get article metadata
+            article_data = supabase.table('articles').select('title, url, created_at, topics').filter('id', 'eq', article_id).execute()
+            article_title = "Unknown Article"
+            article_url = "#"
+            created_at = None
+            article_topics = []
+            
+            if article_data.data and len(article_data.data) > 0:
+                article_title = article_data.data[0]['title']
+                article_url = article_data.data[0]['url']
+                created_at = article_data.data[0].get('created_at')
+                article_topics = article_data.data[0].get('topics', [])
+            
+            # Create a simple hash of the content to detect duplicates/very similar content
+            content_hash = hash(result['segment_text'][:100].lower().strip())
+            
+            # Skip if we've seen very similar content already
+            if content_hash in seen_content_hashes:
+                print(f"Skipping duplicate content from article: {article_title}")
+                continue
+                
+            seen_content_hashes.add(content_hash)
+            seen_article_ids.add(article_id)
+            
+            # Check if this is from the current article
+            is_from_current_article = article_url == article_url
+            
+            # Add relevance details for transparency
+            relevance_details = f"Relevance: {result['combined_score']:.2f}"
+            if 'topic_overlap' in result and result['topic_overlap'] > 0:
+                relevance_details += f", Topic match: {result['topic_overlap']:.2f}"
+            if 'keyword_match' in result and result['keyword_match'] > 0:
+                relevance_details += f", Keyword match: {result['keyword_match']:.2f}"
+            if 'importance_score' in result and result['importance_score'] != 1.0:
+                relevance_details += f", Importance: {result['importance_score']:.2f}"
+            
+            context_chunks.append({
+                'text': result['segment_text'],
+                'source': article_title,
+                'url': article_url,
+                'similarity': result.get('similarity', 0),
+                'combined_score': result.get('combined_score', 0),
+                'created_at': created_at,
+                'is_current_article': is_from_current_article,
+                'topics': article_topics,
+                'keywords': result.get('keywords', []),
+                'relevance_details': relevance_details
+            })
+        
+        # Add current article results if not already processed
+        if not is_about_current_article:
+            for result in current_article_results:
+                article_id = result['article_id']
+                
+                # Skip if we've already included this article
+                if article_id in seen_article_ids:
+                    continue
+                    
+                # Get article metadata
+                article_data = supabase.table('articles').select('title, url, created_at, topics').filter('id', 'eq', article_id).execute()
+                article_title = "Unknown Article"
+                article_url = "#"
+                created_at = None
+                article_topics = []
+                
+                if article_data.data and len(article_data.data) > 0:
+                    article_title = article_data.data[0]['title']
+                    article_url = article_data.data[0]['url']
+                    created_at = article_data.data[0].get('created_at')
+                    article_topics = article_data.data[0].get('topics', [])
+                
+                # Create a simple hash of the content to detect duplicates
+                content_hash = hash(result['segment_text'][:100].lower().strip())
+                
+                # Skip if we've seen very similar content already
+                if content_hash in seen_content_hashes:
+                    continue
+                    
+                seen_content_hashes.add(content_hash)
+                seen_article_ids.add(article_id)
+                
+                # Check if this is from the current article
+                is_from_current_article = article_url == article_url
+                
+                # Add relevance details
+                relevance_details = f"Relevance: {result.get('combined_score', result.get('similarity', 0)):.2f}"
+                if 'importance_score' in result and result['importance_score'] != 1.0:
+                    relevance_details += f", Importance: {result['importance_score']:.2f}"
+                
+                context_chunks.append({
+                    'text': result['segment_text'],
+                    'source': article_title,
+                    'url': article_url,
+                    'similarity': result.get('similarity', 0),
+                    'combined_score': result.get('combined_score', result.get('similarity', 0) * 1.5),  # Boost current article
+                    'created_at': created_at,
+                    'is_current_article': is_from_current_article,
+                    'topics': article_topics,
+                    'keywords': result.get('keywords', []),
+                    'relevance_details': relevance_details
+                })
+        
+        # Sort context chunks by combined score
+        context_chunks.sort(key=lambda x: x['combined_score'], reverse=True)
+        
+        # Take top 5 most relevant chunks
+        context_chunks = context_chunks[:5]
+        
+        print(f"Selected {len(context_chunks)} context chunks after filtering and ranking")
+        
+        # Format context for the prompt
+        current_article_chunks = [chunk for chunk in context_chunks if chunk.get('is_current_article', False)]
+        other_article_chunks = [chunk for chunk in context_chunks if not chunk.get('is_current_article', False)]
+        
+        # First add current article context
+        formatted_context = ""
+        if current_article_chunks:
+            formatted_context += "# Content from your CURRENT article:\n"
+            formatted_context += "\n\n".join([
+                f"From '{chunk['source']}' ({chunk['url']}):\n{chunk['text']}\n[{chunk['relevance_details']}]" 
+                for chunk in current_article_chunks
+            ])
+        
+        # Then add context from other articles if available
+        if other_article_chunks:
+            if formatted_context:
+                formatted_context += "\n\n# Content from your PREVIOUS reading:\n"
+            else:
+                formatted_context += "# Content from your reading history:\n"
+                
+            formatted_context += "\n\n".join([
+                f"From '{chunk['source']}' ({chunk['url']}):\n{chunk['text']}\n[{chunk['relevance_details']}]" 
+                for chunk in other_article_chunks
+            ])
+        
+        # Step 2: Prepare conversation history for the prompt
+        formatted_history = ""
+        if conversation_history:
+            formatted_history = "\n".join([
+                f"{msg['role'].capitalize()}: {msg['content']}" 
+                for msg in conversation_history[-5:]  # Include last 5 messages
+            ])
+        
+        # Step 3: Generate insights and suggestions from reading history
+        insights = ""
+        if len(context_chunks) > 0:
+            # Find patterns or connections between articles
+            related_titles = list(set([chunk['source'] for chunk in context_chunks]))
+            if len(related_titles) > 1:
+                insights = f"You've read multiple articles that might relate to this: {', '.join(related_titles)}"
+        
+        # Step 4: Build the comprehensive prompt
+        prompt = f"""
+        # User Query
+        {message}
+        
+        # Relevant Information from Your Reading
+        {formatted_context}
+        
+        {f"# Previous Conversation\n{formatted_history}" if formatted_history else ""}
+        
+        {f"# Insights\n{insights}" if insights else ""}
+        
+        You are an assistant helping a user understand articles they've read.
+        """
+        
+        # Add special instructions based on query type
+        if is_about_current_article:
+            prompt += f"""
+            The user is asking about their CURRENT article '{article_title}'. 
+            Focus EXCLUSIVELY on explaining what this specific article is about based on the provided context.
+            If you don't have enough information about the current article, acknowledge this and ask for more details.
+            """
+        else:
+            prompt += """
+            Respond conversationally to their question using the provided context from their reading history.
+            Clearly distinguish between content from their CURRENT article versus previous articles they've read.
+            """
+        
+        prompt += """
+        Guidelines:
+        1. Cite sources when providing information from specific articles
+        2. If information comes from multiple sources, synthesize a coherent answer
+        3. If the context doesn't contain enough information, acknowledge this and provide a helpful response based on general knowledge
+        4. Keep your response concise and focused on answering the user's question
+        5. When referring to articles, clearly indicate which one is the CURRENT article versus previous reading
+        6. Pay attention to the relevance details provided with each source to understand why it was selected
+        """
+        
+        # Prepare request to Gemini API
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.7,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 1024
+            }
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        print("Sending request to Gemini API for enhanced chat response")
+        response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+        response_data = response.json()
+        
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            response_text = response_data['candidates'][0]['content']['parts'][0]['text']
+            
+            # Generate suggestions for follow-up questions
+            suggestions = []
+            
+            # Generate suggestions based on context
+            if len(context_chunks) > 2:
+                suggestion_prompt = f"""
+                Based on the user's question "{message}" and the content they've read about:
+                
+                {formatted_context[:500]}
+                
+                Generate 2-3 brief follow-up questions they might want to ask next. 
+                Each question should be a single sentence. Return only the questions, one per line.
+                """
+                
+                suggestion_payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": suggestion_prompt
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.9,
+                        "maxOutputTokens": 256
+                    }
+                }
+                
+                try:
+                    suggestion_response = session.post(
+                        GEMINI_API_URL, 
+                        headers=headers, 
+                        data=json.dumps(suggestion_payload)
+                    )
+                    suggestion_data = suggestion_response.json()
+                    
+                    if 'candidates' in suggestion_data and len(suggestion_data['candidates']) > 0:
+                        suggestion_text = suggestion_data['candidates'][0]['content']['parts'][0]['text']
+                        # Extract questions from the response
+                        suggestions = [
+                            q.strip() for q in suggestion_text.split('\n') 
+                            if q.strip() and '?' in q
+                        ][:3]  # Limit to 3 suggestions
+                except Exception as e:
+                    print(f"Error generating suggestions: {str(e)}")
+            
+            # Generate a new conversation ID if one wasn't provided
+            if not conversation_id:
+                conversation_id = str(uuid.uuid4())
+            
+            # Prepare the response with sources, suggestions, and conversation tracking
+            # De-duplicate sources while preserving order
+            seen_sources = {}  # Use dict to preserve original order
+            
+            for chunk in context_chunks:
+                source_key = (chunk["source"], chunk["url"])
+                if source_key not in seen_sources:
+                    seen_sources[source_key] = {
+                        "title": chunk["source"], 
+                        "url": chunk["url"]
+                    }
+            
+            # Convert to list while preserving order
+            unique_sources = list(seen_sources.values())
+            
+            print(f"Returning {len(unique_sources)} unique sources after deduplication")
+            
+            return jsonify({
+                'response': response_text,
+                'conversation_id': conversation_id,
+                'sources': unique_sources,
+                'suggestions': suggestions
+            })
+        else:
+            error_message = response_data.get('error', {}).get('message', 'Unknown error')
+            print(f"Failed to generate response: {error_message}")
+            return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
+    
+    except Exception as e:
+        print(f"Exception in enhanced chat: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

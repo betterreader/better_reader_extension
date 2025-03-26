@@ -149,3 +149,50 @@ export async function getArticleRecommendations(articleId: string, limit: number
     throw error;
   }
 }
+
+/**
+ * Enhanced chat function that leverages vector search across all articles
+ *
+ * @param message - The user's message or question
+ * @param conversationId - Optional ID to track conversation history
+ * @param conversationHistory - Optional array of previous messages
+ * @param currentArticleId - Optional ID of the current article
+ * @param currentArticleContent - Optional content of the current article
+ * @returns Promise with the API response
+ */
+export async function enhancedChat(
+  message: string,
+  conversationId?: string,
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  currentArticleId?: string,
+  currentArticleContent?: string,
+): Promise<any> {
+  try {
+    console.log(`Sending enhanced chat request: "${message}"`);
+
+    const response = await fetch(`${API_BASE_URL}/api/enhanced_chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message,
+        conversation_id: conversationId,
+        conversation_history: conversationHistory,
+        current_article_id: currentArticleId,
+        current_article_content: currentArticleContent,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`API error (${response.status}): ${errorText}`);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error in enhanced chat:', error);
+    throw error;
+  }
+}

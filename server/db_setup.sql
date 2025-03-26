@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS articles (
     title TEXT NOT NULL,
     user_id UUID,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    topics TEXT[], -- Array of topics/keywords for the article
     CONSTRAINT unique_article_url UNIQUE (url)
 );
 
@@ -19,6 +20,8 @@ CREATE TABLE IF NOT EXISTS article_segments (
     embedding VECTOR(1536),  -- OpenAI's text-embedding-3-small has 1536 dimensions
     segment_index INTEGER NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    keywords TEXT[], -- Keywords specific to this segment
+    importance_score FLOAT DEFAULT 1.0, -- Score indicating the importance of this segment
     CONSTRAINT unique_segment_per_article UNIQUE (article_id, segment_index)
 );
 
@@ -30,3 +33,5 @@ USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX IF NOT EXISTS idx_article_segments_article_id ON article_segments (article_id);
 CREATE INDEX IF NOT EXISTS idx_articles_user_id ON articles (user_id);
 CREATE INDEX IF NOT EXISTS idx_articles_url ON articles (url);
+CREATE INDEX IF NOT EXISTS idx_articles_topics ON articles USING GIN (topics);
+CREATE INDEX IF NOT EXISTS idx_article_segments_keywords ON article_segments USING GIN (keywords);
