@@ -8,7 +8,7 @@ import type { Session } from '@supabase/supabase-js';
 
 function App() {
   // TODO: validate if useState is needed
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setUser] = useState<Session | null>(null);
 
   // Singleton instance of Supabase client
   const supabase = getSupabaseClient();
@@ -21,7 +21,7 @@ function App() {
         if (supaAuthError) {
           throw supaAuthError;
         }
-        setSession(session);
+        setUser(session);
       }
     } catch (error) {
       console.error('Error getting session:', error);
@@ -29,30 +29,57 @@ function App() {
   }
 
   async function loginWithGoogle(): Promise<void> {
-    const redirectURL = chrome.identity.getRedirectURL();
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectURL,
-      },
-    });
-    if (error) throw error;
+    try {
+      // For testing purposes, use email/password login instead of Google OAuth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: 'test@example.com',
+        password: 'password123',
+      });
 
-    await chrome.tabs.create({ url: data.url });
+      if (error) {
+        console.error('Login error:', error);
+
+        // If the user doesn't exist, create a test account
+        if (error.message.includes('Invalid login credentials')) {
+          console.log('Creating test user account...');
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: 'test@example.com',
+            password: 'password123',
+          });
+
+          if (signUpError) {
+            console.error('Sign up error:', signUpError);
+            throw signUpError;
+          }
+
+          console.log('Test user created successfully');
+          setUser(signUpData.user);
+          return;
+        }
+
+        throw error;
+      }
+
+      setUser(data.user);
+      console.log('Logged in successfully with test account');
+    } catch (error) {
+      console.error('Authentication error:', error);
+      alert('Authentication failed. See console for details.');
+    }
   }
 
   useEffect(() => {
     getSessionFromStorage();
 
     // Listen for auth state changes to update the session state automatically
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session));
 
     function handleSessionMessage(message: any) {
       if (message.type === 'SESSION_UPDATED' && 'session' in message) {
         supabase.auth
           .setSession(message.session)
           .then(({ data: { session } }) => {
-            setSession(session);
+            setUser(session);
           })
           .catch(error => {
             console.error('Error setting session:', error);

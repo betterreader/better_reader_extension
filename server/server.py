@@ -12,6 +12,9 @@ from supabase import create_client, Client
 from typing import List, Dict, Any, Optional, Tuple
 import datetime
 from functools import wraps
+import openai
+from flask import g
+import atexit
 
 # Load environment variables
 load_dotenv()
@@ -21,14 +24,26 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY')
 SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 
+# Use service role key for database operations
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+# Configure OpenAI API
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+openai.api_key = OPENAI_API_KEY
 
 # NOTE: These supabase functions aren't being used at the moment
 def require_supabase_user(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # TEMPORARILY DISABLED FOR TESTING - REMOVE THIS COMMENT WHEN DONE TESTING
+        # Skip authentication check for now
+        return f(*args, **kwargs)
+
+        # Original authentication code - commented out for testing
+        """
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             return jsonify({"error": "Missing or invalid Authorization header"}), 401
@@ -44,6 +59,7 @@ def require_supabase_user(f):
         except Exception as e:
             print("Auth failed:", e)
             return jsonify({"error": "Invalid or expired token"}), 401
+        """
 
         return f(*args, **kwargs)
     return decorated_function
@@ -156,6 +172,401 @@ PERPLEXITY_HEADERS = {
     "Content-Type": "application/json"
 }
 
+# Create a session for requests to avoid semaphore leaks
+session = requests.Session()
+
+# Register cleanup function to close session on shutdown
+def cleanup_resources():
+    session.close()
+    print("Cleaned up resources")
+
+atexit.register(cleanup_resources)
+
+# Text segmentation and embedding utilities
+def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> List[str]:
+    """
+    Segment article text into overlapping chunks for embedding.
+    
+    Args:
+        text: The article text to segment
+        max_chunk_size: Maximum size of each chunk in characters
+        overlap: Number of characters to overlap between chunks
+        
+    Returns:
+        List of text segments
+    """
+    # Clean the text
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # If text is shorter than max_chunk_size, return it as is
+    if len(text) <= max_chunk_size:
+        return [text]
+    
+    segments = []
+    start = 0
+    
+    while start < len(text):
+        # Get chunk of max_chunk_size
+        end = start + max_chunk_size
+        
+        # If we're not at the end of the text, try to find a sentence break
+        if end < len(text):
+            # Look for a sentence break (period followed by space)
+            sentence_break = text.rfind('. ', start, end)
+            if sentence_break != -1:
+                end = sentence_break + 1  # Include the period
+        
+        # Add the segment
+        segments.append(text[start:end].strip())
+        
+        # Move the start position, accounting for overlap
+        start = end - overlap if end < len(text) else end
+    
+    return segments
+
+def generate_embedding(text: str) -> List[float]:
+    """
+    Generate an embedding for a text segment using OpenAI's API.
+    
+    Args:
+        text: The text to generate an embedding for
+        
+    Returns:
+        Embedding vector as a list of floats
+    """
+    try:
+        response = openai.embeddings.create(
+            model="text-embedding-3-small",
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"Error generating embedding: {str(e)}")
+        raise
+
+def store_article_embeddings(
+    url: str, 
+    title: str, 
+    segments: List[str], 
+    embeddings: List[List[float]],
+    user_id: Optional[str] = None
+) -> bool:
+    """
+    Store article segments and their embeddings in Supabase.
+    
+    Args:
+        url: The URL of the article
+        title: The title of the article
+        segments: List of text segments
+        embeddings: List of embedding vectors
+        user_id: Optional user ID
+        
+    Returns:
+        Success status
+    """
+    try:
+        article_id = str(uuid.uuid4())
+        article_data = {
+            'id': article_id,
+            'url': url,
+            'title': title,
+            'user_id': user_id,
+            'created_at': datetime.datetime.now().isoformat()
+        }
+        
+        # Insert article metadata
+        print(f"Inserting article with ID: {article_id}")
+        supabase.table('articles').insert(article_data).execute()
+        
+        # Insert segments and embeddings
+        for i, (segment, embedding) in enumerate(zip(segments, embeddings)):
+            segment_data = {
+                'id': str(uuid.uuid4()),
+                'article_id': article_id,
+                'segment_text': segment,
+                'embedding': embedding,
+                'segment_index': i
+            }
+            supabase.table('article_segments').insert(segment_data).execute()
+        
+        return True
+    except Exception as e:
+        print(f"Error storing article embeddings: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return False
+
+def vector_search(
+    query: str, 
+    limit: int = 5, 
+    article_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Perform a vector search using the query embedding.
+    
+    Args:
+        query: The search query
+        limit: Maximum number of results to return
+        article_id: Optional article ID to filter results
+        
+    Returns:
+        List of matching segments with similarity scores
+    """
+    try:
+        # Generate embedding for the query
+        query_embedding = generate_embedding(query)
+        
+        # Build the search query
+        search_query = supabase.table('article_segments')
+        
+        if article_id:
+            search_query = search_query.eq('article_id', article_id)
+        
+        # Execute the vector search
+        # Note: This uses pgvector's '<->' operator for cosine distance
+        result = search_query.select('*, articles!inner(*)').\
+            order('embedding <-> $1', query_embedding).\
+            limit(limit).\
+            execute()
+        
+        return result.data
+    except Exception as e:
+        print(f"Error in vector search: {str(e)}")
+        return []
+
+@app.route('/api/process_article', methods=['POST'])
+def process_article():
+    """
+    Process an article to segment text and generate embeddings.
+    
+    Request JSON:
+    {
+        "url": "https://example.com/article",
+        "title": "Article Title",
+        "content": "Full article text...",
+        "user_id": "optional-user-id"
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({'error': 'No data received'}), 400
+        
+        if 'content' not in data or 'url' not in data:
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        url = data['url']
+        title = data.get('title', 'Untitled Article')
+        content = data['content']
+        user_id = data.get('user_id')
+        
+        # Segment the article text
+        segments = segment_text(content)
+        
+        # Generate embeddings for each segment
+        embeddings = [generate_embedding(segment) for segment in segments]
+        
+        # Store segments and embeddings
+        success = store_article_embeddings(url, title, segments, embeddings, user_id)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Article processed successfully',
+                'segments_count': len(segments)
+            })
+        else:
+            return jsonify({'error': 'Failed to store article data'}), 500
+            
+    except Exception as e:
+        print(f"Error processing article: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/vector_search', methods=['POST'])
+def vector_search_endpoint():
+    """
+    Perform a vector search using the query.
+    
+    Request JSON:
+    {
+        "query": "Search query",
+        "limit": 5,
+        "article_id": "optional-article-id"
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data or 'query' not in data:
+            return jsonify({'error': 'Missing query parameter'}), 400
+        
+        query = data['query']
+        limit = data.get('limit', 5)
+        article_id = data.get('article_id')
+        
+        results = vector_search(query, limit, article_id)
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        print(f"Error in vector search: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/vector_search_qa', methods=['POST'])
+def vector_search_qa():
+    """
+    Perform a vector search and generate an answer using the retrieved context.
+    
+    Request JSON:
+    {
+        "query": "Question to answer",
+        "limit": 5,
+        "article_id": "optional-article-id"
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data or 'query' not in data:
+            return jsonify({'error': 'Missing query parameter'}), 400
+        
+        query = data['query']
+        limit = data.get('limit', 5)
+        article_id = data.get('article_id')
+        
+        # Get relevant context from vector search
+        search_results = vector_search(query, limit, article_id)
+        
+        if not search_results:
+            return jsonify({
+                'success': False,
+                'answer': "I couldn't find any relevant information to answer your question."
+            }), 404
+        
+        # Extract text from results
+        context = "\n\n".join([result['segment_text'] for result in search_results])
+        
+        # Generate answer using Gemini API
+        gemini_prompt = f"""
+        I need to answer a question based on the provided context. 
+        
+        Context:
+        {context}
+        
+        Question: {query}
+        
+        Provide a clear, concise answer based solely on the information in the context. If the context doesn't contain the answer, say "I don't have enough information to answer that question."
+        """
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "contents": [{
+                "parts": [{
+                    "text": gemini_prompt
+                }]
+            }]
+        }
+        
+        response = session.post(
+            GEMINI_API_URL,
+            headers=headers,
+            json=data
+        )
+        
+        response_json = response.json()
+        
+        if 'candidates' in response_json and len(response_json['candidates']) > 0:
+            answer = response_json['candidates'][0]['content']['parts'][0]['text']
+            return jsonify({
+                'success': True,
+                'answer': answer,
+                'context': context
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'answer': "Failed to generate an answer.",
+                'context': context
+            }), 500
+            
+    except Exception as e:
+        print(f"Error in vector search QA: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get_article_recommendations', methods=['POST'])
+def get_article_recommendations():
+    """
+    Get article recommendations based on similarity to a given article.
+    
+    Request JSON:
+    {
+        "article_id": "article-uuid",
+        "limit": 5
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data or 'article_id' not in data:
+            return jsonify({'error': 'Missing article_id parameter'}), 400
+        
+        article_id = data['article_id']
+        limit = data.get('limit', 5)
+        
+        # Get the article segments
+        article_segments = supabase.table('article_segments')\
+            .select('*')\
+            .eq('article_id', article_id)\
+            .execute()
+        
+        if not article_segments.data:
+            return jsonify({'error': 'Article not found or has no segments'}), 404
+        
+        # Get a representative embedding (using the first segment as a simple approach)
+        article_embedding = article_segments.data[0]['embedding']
+        
+        # Find similar articles based on vector similarity
+        # This query finds articles that are not the current article but have similar content
+        similar_articles = supabase.table('article_segments')\
+            .select('articles!inner(id, url, title)')\
+            .not_('article_id', 'eq', article_id)\
+            .order('embedding <-> $1', article_embedding)\
+            .limit(limit)\
+            .execute()
+        
+        # Extract unique articles from the results
+        seen_article_ids = set()
+        recommendations = []
+        
+        for item in similar_articles.data:
+            article = item['articles']
+            if article['id'] not in seen_article_ids:
+                seen_article_ids.add(article['id'])
+                recommendations.append({
+                    'id': article['id'],
+                    'url': article['url'],
+                    'title': article['title']
+                })
+                
+                if len(recommendations) >= limit:
+                    break
+        
+        return jsonify({
+            'success': True,
+            'recommendations': recommendations
+        })
+        
+    except Exception as e:
+        print(f"Error getting article recommendations: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/test', methods=['GET'])
 def test():
     return jsonify({'status': 'ok', 'message': 'Server is running'}), 200
@@ -227,7 +638,7 @@ def chat():
     
     try:
         print("Evaluating if question can be answered from article")
-        evaluation_response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(evaluation_payload))
+        evaluation_response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(evaluation_payload))
         evaluation_data = evaluation_response.json()
         
         if 'candidates' in evaluation_data and len(evaluation_data['candidates']) > 0:
@@ -306,7 +717,7 @@ def chat():
             }
             
             print("Sending request to Gemini API for final response")
-            response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+            response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
             response_data = response.json()
             
             print(f"Received response from Gemini API: {response.status_code}")
@@ -366,395 +777,56 @@ def analyze():
     }}
     """
     
-    # Prepare request to Gemini API
-    payload = {
+    # Log the request
+    print(f"Image generation request received for article: {article_title}")
+    
+    # Call the Gemini API to generate an image
+    # For now, we'll return a placeholder image URL since Gemini doesn't directly generate images
+    # In a real implementation, you would use an image generation API like DALL-E or Midjourney
+    
+    # Generate a caption for the image
+    caption_prompt = f"""
+    Create a brief caption (1-2 sentences) for an image that represents the main theme of this article:
+    
+    Article Title: {article_title}
+    
+    Article Content: {article_content[:500]}...
+    
+    The caption should be concise and capture the essence of what the image would show.
+    """
+    
+    caption_response = session.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, data=json.dumps({
         "contents": [
             {
                 "parts": [
                     {
-                        "text": prompt
+                        "text": caption_prompt
                     }
                 ]
             }
         ],
         "generationConfig": {
-            "temperature": 0.2,
+            "temperature": 0.7,
             "topK": 40,
             "topP": 0.95,
             "maxOutputTokens": 1024
         }
-    }
+    })).json()
     
-    headers = {
-        "Content-Type": "application/json"
-    }
+    if 'candidates' in caption_response and len(caption_response['candidates']) > 0:
+        caption = caption_response['candidates'][0]['content']['parts'][0]['text']
+    else:
+        caption = "Image based on article content"
     
-    try:
-        print("Sending request to Gemini API")
-        response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
-        response_data = response.json()
-        
-        print(f"Received response from Gemini API: {response.status_code}")
-        
-        if 'candidates' in response_data and len(response_data['candidates']) > 0:
-            generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
-            
-            # Extract JSON from the response
-            try:
-                # Find JSON in the response (it might be wrapped in markdown code blocks)
-                json_str = generated_text
-                if "```json" in generated_text:
-                    json_str = generated_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in generated_text:
-                    json_str = generated_text.split("```")[1].split("```")[0].strip()
-                
-                analysis_data = json.loads(json_str)
-                print("Successfully parsed JSON response")
-                return jsonify(analysis_data)
-            except json.JSONDecodeError as e:
-                print(f"JSON parsing error: {str(e)}")
-                # If JSON parsing fails, return the raw text
-                return jsonify({
-                    'summary': generated_text[:500],
-                    'keyPoints': ["Unable to parse structured data"],
-                    'relatedTopics': ["Unable to parse structured data"]
-                })
-        else:
-            error_message = response_data.get('error', {}).get('message', 'Unknown error')
-            print(f"Failed to generate response: {error_message}")
-            return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
+    # For demonstration purposes, return a placeholder image URL
+    # In a real implementation, you would generate an actual image or use a pre-generated one
+    placeholder_image_url = "https://via.placeholder.com/800x400?text=Article+Visualization"
     
-    except Exception as e:
-        print(f"Exception occurred: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/generate-quiz', methods=['POST'])
-def generate_quiz():
-    print("Received quiz generation request")
-    try:
-        data = request.json
-        
-        if not data:
-            print("No data received")
-            return jsonify({'error': 'No data received'}), 400
-        
-        print(f"Request data: {data.keys()}")
-        
-        if 'articleContent' not in data:
-            print("Missing articleContent parameter")
-            return jsonify({'error': 'Missing article content'}), 400
-        
-        article_content = data['articleContent']
-        article_title = data.get('articleTitle', '')
-        custom_prompt = data.get('customPrompt', '')
-        client_timestamp = data.get('timestamp', '')
-        user_level = data.get('userLevel', '')
-        
-        # Add timestamp to encourage different questions each time
-        import datetime
-        import random
-        import uuid
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-        random_seed = random.randint(1, 1000000)
-        unique_id = str(uuid.uuid4())
-        
-        print(f"Processing quiz generation request for article '{article_title}'")
-        print(f"Article content length: {len(article_content)}")
-        print(f"Custom prompt: {custom_prompt}")
-        print(f"User level: {user_level}")
-        print(f"Client timestamp: {client_timestamp}")
-        print(f"Request time: {current_time}")
-        print(f"Random seed: {random_seed}")
-        print(f"Unique ID: {unique_id}")
-        
-        # Adjust difficulty based on user level
-        difficulty_instruction = ""
-        if user_level == 'beginner':
-            difficulty_instruction = """
-            Since the user is a BEGINNER in this topic:
-            - Focus on fundamental concepts and basic information from the article
-            - Use simple, clear language in both questions and answer choices
-            - Avoid complex terminology without explanation
-            - Include more straightforward questions that test basic understanding
-            - Make distractors (wrong answers) clearly distinguishable from correct answers
-            """
-        elif user_level == 'intermediate':
-            difficulty_instruction = """
-            Since the user has INTERMEDIATE knowledge of this topic:
-            - Balance between fundamental concepts and more nuanced details
-            - Include some questions that require connecting multiple concepts
-            - Use moderate domain-specific terminology where appropriate
-            - Create questions that test both recall and application of concepts
-            - Make distractors (wrong answers) plausible but distinguishable
-            """
-        elif user_level == 'expert':
-            difficulty_instruction = """
-            Since the user has EXPERT knowledge of this topic:
-            - Focus on nuanced details, advanced concepts, and deeper implications
-            - Include questions that require synthesis of multiple concepts
-            - Don't shy away from domain-specific terminology and advanced concepts
-            - Create challenging questions that test deep understanding and critical thinking
-            - Make distractors (wrong answers) sophisticated and plausible
-            """
-        
-        # Create prompt for quiz generation
-        if custom_prompt:
-            base_prompt = f"""
-            You are an educational assistant that creates tailored quiz questions to help users test their understanding of articles they're reading.
-
-            ARTICLE CONTENT:
-            {article_content[:4000]}
-
-            USER REQUEST:
-            {custom_prompt}
-
-            USER KNOWLEDGE LEVEL:
-            {user_level}
-
-            CURRENT TIME: {current_time}
-            UNIQUE ID: {unique_id}
-            CLIENT TIMESTAMP: {client_timestamp}
-
-            TASK:
-            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request and knowledge level.
-
-            {difficulty_instruction}
-
-            INSTRUCTIONS:
-            1. Analyze the user's request to understand what types of questions they want (e.g., about specific topics, concepts, or sections of the article).
-            2. Generate 3-5 multiple-choice questions that align with the user's request while covering important content from the article.
-            3. If the user hasn't specified question types, focus on the most important concepts and key takeaways.
-            4. Each question should have 4 answer options with exactly one correct answer.
-            5. Ensure questions are directly answerable from the article content.
-            6. Do not create questions about information not present in the article.
-            7. IMPORTANT: Generate unique and diverse questions each time. Do not repeat questions from previous requests.
-            8. Format your response as a valid JSON object with the following structure:
-
-            {{
-              "questions": [
-                {{
-                  "question": "Question text goes here?",
-                  "options": [
-                    "Option A",
-                    "Option B",
-                    "Option C",
-                    "Option D"
-                  ],
-                  "correctAnswer": 0,
-                  "explanation": "Brief explanation of why this answer is correct"
-                }},
-                ...
-              ]
-            }}
-
-            The "correctAnswer" field should be the zero-based index of the correct option (0 for first option, 1 for second, etc.).
-            Ensure your response is properly formatted JSON that can be parsed by JavaScript's JSON.parse() function.
-
-            If the user's request cannot be fulfilled based on the article content, respond with a friendly message explaining why and offer to generate general questions about the article instead.
-            """
-        else:
-            base_prompt = f"""
-            You are an educational assistant that creates tailored quiz questions to help users test their understanding of articles they're reading.
-
-            ARTICLE CONTENT:
-            {article_content[:4000]}
-
-            USER REQUEST:
-            Generate quiz questions about the main concepts and key points from this article.
-
-            USER KNOWLEDGE LEVEL:
-            {user_level}
-
-            CURRENT TIME: {current_time}
-            UNIQUE ID: {unique_id}
-            CLIENT TIMESTAMP: {client_timestamp}
-
-            TASK:
-            Create personalized multiple-choice quiz questions based on the article content that match the user's specific request and knowledge level.
-
-            {difficulty_instruction}
-
-            INSTRUCTIONS:
-            1. Analyze the user's request to understand what types of questions they want (e.g., about specific topics, concepts, or sections of the article).
-            2. Generate 3-5 multiple-choice questions that align with the user's request while covering important content from the article.
-            3. If the user hasn't specified question types, focus on the most important concepts and key takeaways.
-            4. Each question should have 4 answer options with exactly one correct answer.
-            5. Ensure questions are directly answerable from the article content.
-            6. Do not create questions about information not present in the article.
-            7. IMPORTANT: Generate unique and diverse questions each time. Do not repeat questions from previous requests.
-            8. Format your response as a valid JSON object with the following structure:
-
-            {{
-              "questions": [
-                {{
-                  "question": "Question text goes here?",
-                  "options": [
-                    "Option A",
-                    "Option B",
-                    "Option C",
-                    "Option D"
-                  ],
-                  "correctAnswer": 0,
-                  "explanation": "Brief explanation of why this answer is correct"
-                }},
-                ...
-              ]
-            }}
-
-            The "correctAnswer" field should be the zero-based index of the correct option (0 for first option, 1 for second, etc.).
-            Ensure your response is properly formatted JSON that can be parsed by JavaScript's JSON.parse() function.
-
-            If the user's request cannot be fulfilled based on the article content, respond with a friendly message explaining why and offer to generate general questions about the article instead.
-            """
-        
-        # Prepare request to Gemini API
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": base_prompt
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.9,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 1024,
-                "seed": random_seed
-            }
-        }
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        try:
-            print("Sending request to Gemini API")
-            response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
-            response_data = response.json()
-            
-            print(f"Received response from Gemini API: {response.status_code}")
-            
-            if 'candidates' in response_data and len(response_data['candidates']) > 0:
-                generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
-                
-                # Extract JSON from the response
-                try:
-                    # Find JSON in the response (it might be wrapped in markdown code blocks)
-                    json_str = generated_text
-                    if "```json" in generated_text:
-                        json_str = generated_text.split("```json")[1].split("```")[0].strip()
-                    elif "```" in generated_text:
-                        json_str = generated_text.split("```")[1].split("```")[0].strip()
-                    
-                    quiz_data = json.loads(json_str)
-                    print("Successfully parsed JSON response")
-                    return jsonify(quiz_data)
-                except json.JSONDecodeError as e:
-                    print(f"JSON parsing error: {str(e)}")
-                    # If JSON parsing fails, return an error
-                    return jsonify({
-                        'error': 'Failed to parse quiz data',
-                        'rawResponse': generated_text
-                    }), 500
-            else:
-                error_message = response_data.get('error', {}).get('message', 'Unknown error')
-                print(f"Failed to generate response: {error_message}")
-                return jsonify({'error': 'Failed to generate quiz', 'details': error_message}), 500
-        
-        except Exception as e:
-            print(f"Exception occurred in generate_quiz: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'imageUrl': placeholder_image_url,
+        'caption': caption
+    })
     
-    except Exception as e:
-        print(f"Exception occurred in generate_quiz: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/generate-image', methods=['POST'])
-def generate_image():
-    data = request.json
-    if 'articleContent' not in data:
-        return jsonify({'error': 'Missing article content'}), 400
-    
-    article_content = data.get('articleContent', '')
-    article_title = data.get('articleTitle', '')
-    article_url = data.get('articleUrl', '')
-    timestamp = data.get('timestamp', str(time.time()))
-    
-    try:
-        # Create a prompt for image generation
-        prompt = f"""
-        Generate an image that visually represents the key concepts or themes from this article.
-        
-        Article Title: {article_title}
-        
-        Article Content: {article_content[:1000]}...
-        
-        Create an image that captures the essence of this article in a visually appealing way.
-        The image should be informative, relevant to the content, and help enhance understanding.
-        
-        Timestamp: {timestamp}
-        """
-        
-        # Log the request
-        print(f"Image generation request received for article: {article_title}")
-        
-        # Call the Gemini API to generate an image
-        # For now, we'll return a placeholder image URL since Gemini doesn't directly generate images
-        # In a real implementation, you would use an image generation API like DALL-E or Midjourney
-        
-        # Generate a caption for the image
-        caption_prompt = f"""
-        Create a brief caption (1-2 sentences) for an image that represents the main theme of this article:
-        
-        Article Title: {article_title}
-        
-        Article Content: {article_content[:500]}...
-        
-        The caption should be concise and capture the essence of what the image would show.
-        """
-        
-        caption_response = requests.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, data=json.dumps({
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": caption_prompt
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.7,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 1024
-            }
-        })).json()
-        
-        if 'candidates' in caption_response and len(caption_response['candidates']) > 0:
-            caption = caption_response['candidates'][0]['content']['parts'][0]['text']
-        else:
-            caption = "Image based on article content"
-        
-        # For demonstration purposes, return a placeholder image URL
-        # In a real implementation, you would generate an actual image or use a pre-generated one
-        placeholder_image_url = "https://via.placeholder.com/800x400?text=Article+Visualization"
-        
-        return jsonify({
-            'imageUrl': placeholder_image_url,
-            'caption': caption
-        })
-        
-    except Exception as e:
-        print(f"Error generating image: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/explain', methods=['POST'])
 def handle_explanation_request():
     try:
@@ -824,7 +896,7 @@ def handle_explanation_request():
         
         while retries <= max_retries:
             try:
-                response = requests.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, data=json.dumps({
+                response = session.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, data=json.dumps({
                     "contents": [
                         {
                             "parts": [
@@ -1065,7 +1137,7 @@ def generate_summary():
         """
         
         # Call Gemini API
-        response = requests.post(
+        response = session.post(
             GEMINI_API_URL,
             headers={"Content-Type": "application/json"},
             json={

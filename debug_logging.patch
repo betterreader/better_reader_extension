@@ -1,0 +1,20 @@
+diff --git a/pages/content/src/articleProcessor.ts b/pages/content/src/articleProcessor.ts
+index whatever..whatever 100644
+--- a/pages/content/src/articleProcessor.ts
++++ b/pages/content/src/articleProcessor.ts
+@@ -87,6 +87,7 @@ export function shouldProcessPage(): boolean {
+  * Processes the current article by extracting content and sending it to the server for embedding
+  */
+ export async function processCurrentArticle(): Promise<void> {
++  console.log('Better Reader: Starting article processing');
+   try {
+     // Check if we should process this page
+     if (!shouldProcessPage()) {
+@@ -96,6 +97,7 @@ export async function processCurrentArticle(): Promise<void> {
+     
+     // Extract article content
+     const article = extractArticleContent();
++    console.log('Better Reader: Article extracted', { title: article.title, contentLength: article.content.length });
+     
+     // Skip if article content is too short (likely not an actual article)
+     if (article.content.length < 500) {
