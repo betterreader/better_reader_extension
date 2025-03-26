@@ -21,9 +21,8 @@ export default async function AuthButton() {
       <Link href="/">Home</Link>
       {user ? (
         <>
-          <Link href="/protected/analyze">Analyze</Link>
-          <Link href="/protected/myStudySessions">My Study Sessions</Link>
           <Link href="/protected/highlights">Highlights</Link>
+          <Link href="/protected/bookmarks">Bookmarks</Link>
           <form action={signOutAction}>
             <Button type="submit" variant={'outline'}>
               Sign out

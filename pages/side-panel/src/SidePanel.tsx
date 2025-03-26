@@ -4,6 +4,7 @@ import QuizTab from '@src/components/QuizTab';
 import NotesTab from '@src/components/NotesTab';
 import ResearchTab from '@src/components/ResearchTab';
 import SummaryTab from '@src/components/SummaryTab';
+import Bookmark from '@src/components/Bookmark';
 import { exampleThemeStorage } from '@extension/storage';
 import SettingsDropdown from '@src/components/SettingsDropdown';
 import { useStorage } from '@extension/shared';
@@ -144,7 +145,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
       }`}>
       <header
         className={`flex flex-col p-4 ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-[#1A1A1A] text-white'}`}>
-        <div className="flex justify-between items-center mb-2">
+        <div className="flex justify-between items-center">
           <span className="text-2xl font-extrabold">
             <a href="http://localhost:3000" target="_blank" rel="noopener noreferrer">
               BetterReader
@@ -155,11 +156,12 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
         <div className={`text-base font-medium truncate ${theme === 'light' ? 'text-gray-600' : 'text-gray-300'}`}>
           {articleData?.title || 'Article Not Found'}
         </div>
+        <Bookmark theme={theme} articleData={articleData} />
       </header>
       <div
         className={`flex justify-between border-b px-4 ${theme === 'light' ? 'bg-gray-100 border-gray-200' : 'bg-[#1A1A1A] border-[#333]'}`}>
         <div
-          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-2 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'chat'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -172,7 +174,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
           Chat
         </div>
         <div
-          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-2 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'summary'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -185,7 +187,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
           Summary
         </div>
         <div
-          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-2 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'quiz'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -198,7 +200,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
           Quiz
         </div>
         <div
-          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-2 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'notes'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'
@@ -211,7 +213,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
           Notes
         </div>
         <div
-          className={` text-center py-4 text-base font-semibold cursor-pointer transition-colors ${
+          className={` text-center py-2 text-base font-semibold cursor-pointer transition-colors ${
             activeTab === 'research'
               ? theme === 'light'
                 ? 'text-gray-900 border-b-4 border-blue-500'

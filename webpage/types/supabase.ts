@@ -73,6 +73,101 @@ export type Database = {
         };
         Relationships: [];
       };
+      article_segments: {
+        Row: {
+          article_id: string;
+          created_at: string | null;
+          embedding: string | null;
+          id: string;
+          importance_score: number | null;
+          keywords: string[] | null;
+          segment_index: number;
+          segment_text: string;
+        };
+        Insert: {
+          article_id: string;
+          created_at?: string | null;
+          embedding?: string | null;
+          id: string;
+          importance_score?: number | null;
+          keywords?: string[] | null;
+          segment_index: number;
+          segment_text: string;
+        };
+        Update: {
+          article_id?: string;
+          created_at?: string | null;
+          embedding?: string | null;
+          id?: string;
+          importance_score?: number | null;
+          keywords?: string[] | null;
+          segment_index?: number;
+          segment_text?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'article_segments_article_id_fkey';
+            columns: ['article_id'];
+            isOneToOne: false;
+            referencedRelation: 'articles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      articles: {
+        Row: {
+          created_at: string | null;
+          id: string;
+          title: string;
+          topics: string[] | null;
+          url: string;
+          user_id: string | null;
+        };
+        Insert: {
+          created_at?: string | null;
+          id: string;
+          title: string;
+          topics?: string[] | null;
+          url: string;
+          user_id?: string | null;
+        };
+        Update: {
+          created_at?: string | null;
+          id?: string;
+          title?: string;
+          topics?: string[] | null;
+          url?: string;
+          user_id?: string | null;
+        };
+        Relationships: [];
+      };
+      bookmark: {
+        Row: {
+          content: string;
+          created_at: string;
+          id: number;
+          title: string;
+          url: string;
+          user_id: string;
+        };
+        Insert: {
+          content: string;
+          created_at?: string;
+          id?: number;
+          title: string;
+          url: string;
+          user_id: string;
+        };
+        Update: {
+          content?: string;
+          created_at?: string;
+          id?: number;
+          title?: string;
+          url?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       highlight: {
         Row: {
           article_title: string;
@@ -126,7 +221,178 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      binary_quantize:
+        | {
+            Args: {
+              '': string;
+            };
+            Returns: unknown;
+          }
+        | {
+            Args: {
+              '': unknown;
+            };
+            Returns: unknown;
+          };
+      halfvec_avg: {
+        Args: {
+          '': number[];
+        };
+        Returns: unknown;
+      };
+      halfvec_out: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      halfvec_send: {
+        Args: {
+          '': unknown;
+        };
+        Returns: string;
+      };
+      halfvec_typmod_in: {
+        Args: {
+          '': unknown[];
+        };
+        Returns: number;
+      };
+      hnsw_bit_support: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      hnsw_halfvec_support: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      hnsw_sparsevec_support: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      hnswhandler: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      ivfflat_bit_support: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      ivfflat_halfvec_support: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      ivfflathandler: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      l2_norm:
+        | {
+            Args: {
+              '': unknown;
+            };
+            Returns: number;
+          }
+        | {
+            Args: {
+              '': unknown;
+            };
+            Returns: number;
+          };
+      l2_normalize:
+        | {
+            Args: {
+              '': string;
+            };
+            Returns: string;
+          }
+        | {
+            Args: {
+              '': unknown;
+            };
+            Returns: unknown;
+          }
+        | {
+            Args: {
+              '': unknown;
+            };
+            Returns: unknown;
+          };
+      sparsevec_out: {
+        Args: {
+          '': unknown;
+        };
+        Returns: unknown;
+      };
+      sparsevec_send: {
+        Args: {
+          '': unknown;
+        };
+        Returns: string;
+      };
+      sparsevec_typmod_in: {
+        Args: {
+          '': unknown[];
+        };
+        Returns: number;
+      };
+      vector_avg: {
+        Args: {
+          '': number[];
+        };
+        Returns: string;
+      };
+      vector_dims:
+        | {
+            Args: {
+              '': string;
+            };
+            Returns: number;
+          }
+        | {
+            Args: {
+              '': unknown;
+            };
+            Returns: number;
+          };
+      vector_norm: {
+        Args: {
+          '': string;
+        };
+        Returns: number;
+      };
+      vector_out: {
+        Args: {
+          '': string;
+        };
+        Returns: unknown;
+      };
+      vector_send: {
+        Args: {
+          '': string;
+        };
+        Returns: string;
+      };
+      vector_typmod_in: {
+        Args: {
+          '': unknown[];
+        };
+        Returns: number;
+      };
     };
     Enums: {
       [_ in never]: never;
