@@ -2180,6 +2180,101 @@ def generate_quiz():
         print(f"Exception occurred in generate_quiz: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/teacher_chat', methods=['POST'])
+def teacher_chat():
+    print("Received teacher chat request")
+    data = request.json
+    
+    if not data:
+        print("No data received")
+        return jsonify({'error': 'No data received'}), 400
+    
+    if 'message' not in data or 'articleContent' not in data:
+        print("Missing required parameters")
+        return jsonify({'error': 'Missing required parameters'}), 400
+    
+    message = data['message']
+    article_content = data['articleContent']
+    article_title = data.get('articleTitle', '')
+    article_url = data.get('articleUrl', '')
+    conversation_history = data.get('conversationHistory', [])
+    
+    # Create the teacher prompt
+    teacher_prompt = f"""You are a thoughtful, Socratic-style teacher helping a student understand an article through guided inquiry and active reflection. Your tone should be warm, conversational, and encouraging—like a favorite professor who challenges their students to think deeply.
+
+Article Title: {article_title}
+
+Article Content (excerpt):
+{article_content[:4000]}
+
+Previous Conversation:
+{chr(10).join([f"{msg['role']}: {msg['content']}" for msg in conversation_history[-5:]])}
+
+Student's Message:
+{message}
+
+Your task:
+
+If this is the start of a discussion or the student's message is general or vague:
+1. Generate a thought-provoking, open-ended discussion question based on key ideas or themes in the article.
+2. Start with broad or foundational questions that lead into deeper exploration.
+3. Focus on prompting curiosity and independent thought, not summarizing or giving answers.
+4. Use follow-up questions to encourage the student to consider multiple perspectives.
+
+If the student has asked a specific question or raised a clear point:
+1. Respond in a Socratic teaching style—do not give direct answers.
+2. Help the student arrive at insights through guided questioning.
+3. Break down complex ideas into simpler parts they can reason through.
+4. Use analogies, metaphors, or concrete examples only when useful.
+5. Gently affirm sound reasoning and correct misunderstandings with encouragement.
+
+Regardless of the situation:
+- Always build on what the student already knows or has said.
+- Ask questions that feel like part of a natural conversation, not a quiz.
+- Avoid sounding robotic—be human, engaged, and intellectually curious.
+
+Respond with just your next message in the conversation."""
+
+    # Call Gemini API with teacher prompt
+    teacher_payload = {
+        "contents": [{
+            "parts": [{
+                "text": teacher_prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.7,
+            "topK": 40,
+            "topP": 0.95,
+            "maxOutputTokens": 1024
+        }
+    }
+
+    try:
+        print("Sending request to Gemini API for teacher mode response")
+        teacher_response = session.post(
+            GEMINI_API_URL,
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(teacher_payload)
+        )
+        teacher_data = teacher_response.json()
+
+        if 'candidates' in teacher_data and len(teacher_data['candidates']) > 0:
+            teacher_text = teacher_data['candidates'][0]['content']['parts'][0]['text']
+            return jsonify({
+                'response': teacher_text,
+                'isTeacherMode': True
+            })
+        else:
+            error_message = teacher_data.get('error', {}).get('message', 'Unknown error')
+            print(f"Failed to generate teacher response: {error_message}")
+            return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
+            
+    except Exception as e:
+        print(f"Exception in teacher chat: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print(f"Starting server on port {PORT}...")
     app.run(debug=True, host='0.0.0.0', port=PORT)
+
