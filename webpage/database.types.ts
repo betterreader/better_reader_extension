@@ -73,79 +73,12 @@ export type Database = {
         };
         Relationships: [];
       };
-      article_segments: {
-        Row: {
-          article_id: string;
-          created_at: string | null;
-          embedding: string | null;
-          id: string;
-          importance_score: number | null;
-          keywords: string[] | null;
-          segment_index: number;
-          segment_text: string;
-        };
-        Insert: {
-          article_id: string;
-          created_at?: string | null;
-          embedding?: string | null;
-          id: string;
-          importance_score?: number | null;
-          keywords?: string[] | null;
-          segment_index: number;
-          segment_text: string;
-        };
-        Update: {
-          article_id?: string;
-          created_at?: string | null;
-          embedding?: string | null;
-          id?: string;
-          importance_score?: number | null;
-          keywords?: string[] | null;
-          segment_index?: number;
-          segment_text?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'article_segments_article_id_fkey';
-            columns: ['article_id'];
-            isOneToOne: false;
-            referencedRelation: 'articles';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      articles: {
-        Row: {
-          created_at: string | null;
-          id: string;
-          title: string;
-          topics: string[] | null;
-          url: string;
-          user_id: string | null;
-        };
-        Insert: {
-          created_at?: string | null;
-          id: string;
-          title: string;
-          topics?: string[] | null;
-          url: string;
-          user_id?: string | null;
-        };
-        Update: {
-          created_at?: string | null;
-          id?: string;
-          title?: string;
-          topics?: string[] | null;
-          url?: string;
-          user_id?: string | null;
-        };
-        Relationships: [];
-      };
       bookmark: {
         Row: {
           content: string;
           created_at: string;
           id: number;
+          tags: string[];
           title: string;
           url: string;
           user_id: string;
@@ -154,6 +87,7 @@ export type Database = {
           content: string;
           created_at?: string;
           id?: number;
+          tags: string[];
           title: string;
           url: string;
           user_id: string;
@@ -162,6 +96,7 @@ export type Database = {
           content?: string;
           created_at?: string;
           id?: number;
+          tags?: string[];
           title?: string;
           url?: string;
           user_id?: string;

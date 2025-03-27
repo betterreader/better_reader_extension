@@ -858,6 +858,59 @@ def get_article_recommendations():
         print(f"Error getting article recommendations: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/generate-tags', methods=['POST'])
+def generate_tags():
+    try:
+        data = request.json
+        if not data or 'content' not in data or 'title' not in data:
+            return jsonify({'error': 'Missing required parameters'}), 400
+
+        content = data['content']
+        title = data['title']
+
+        # Create prompt for tag generation
+        prompt = f"""
+        Title: {title}
+        
+        Content: {content[:1000]}  # Limit content length
+        
+        Generate 5 relevant tags for this article. Tags should be:
+        1. Single words or short phrases (2-3 words max)
+        2. Relevant to the main topics and themes
+        3. A mix of general and specific topics
+        4. Useful for categorization and search
+        
+        Return only the tags as a JSON array of strings.
+        """
+
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that generates relevant tags for articles."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=150
+        )
+
+        # Extract tags from response
+        try:
+            tags_text = response.choices[0].message.content.strip()
+            # Handle if response is wrapped in code blocks
+            if "```json" in tags_text:
+                tags_text = tags_text.split("```json")[1].split("```")[0]
+            elif "```" in tags_text:
+                tags_text = tags_text.split("```")[1].split("```")[0]
+            tags = json.loads(tags_text)
+            return jsonify({'tags': tags})
+        except Exception as e:
+            print(f"Error parsing tags: {str(e)}")
+            return jsonify({'error': 'Failed to parse tags'}), 500
+
+    except Exception as e:
+        print(f"Error generating tags: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/test', methods=['GET'])
 def test():
     return jsonify({'status': 'ok', 'message': 'Server is running'}), 200

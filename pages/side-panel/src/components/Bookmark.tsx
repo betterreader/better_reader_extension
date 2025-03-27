@@ -12,6 +12,10 @@ interface Props {
   articleData: ArticleData | null;
 }
 
+interface TagResponse {
+  tags: string[];
+}
+
 const BookmarkToggle: React.FC<Props> = ({ theme, articleData }) => {
   if (!articleData) {
     return <div className="ml-1 text-sm">Cannot Save Article</div>;
@@ -20,6 +24,9 @@ const BookmarkToggle: React.FC<Props> = ({ theme, articleData }) => {
   const supabase = getSupabaseClient();
   const [bookmarked, setBookmarked] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
+  const [showTags, setShowTags] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   const fetchBookmark = async () => {
     setLoading(true);
@@ -35,6 +42,7 @@ const BookmarkToggle: React.FC<Props> = ({ theme, articleData }) => {
       setLoading(false);
     } else {
       setBookmarked(data.length > 0);
+      setTags(data.length > 0 ? data[0].tags : []);
       setLoading(false);
     }
   };
@@ -43,23 +51,57 @@ const BookmarkToggle: React.FC<Props> = ({ theme, articleData }) => {
     fetchBookmark();
   }, [articleData]);
 
+  const generateTags = async () => {
+    try {
+      const response = await fetch('http://localhost:5007/api/generate-tags', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: articleData.content,
+          title: articleData.title,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate tags');
+      }
+
+      const data: TagResponse = await response.json();
+      return data.tags;
+    } catch (error) {
+      console.error('Error generating tags:', error);
+      setTagError('Failed to generate tags');
+      return [];
+    }
+  };
+
   const addBookmark = async () => {
     const user_id = (await supabase.auth.getUser()).data.user?.id;
     console.log('ArticleData:', articleData);
     setLoading(true);
+
+    // Generate tags before saving bookmark
+    const generatedTags = await generateTags();
+    setTags(generatedTags);
+
     const { data, error } = await supabase.from('bookmark').insert([
       {
         url: articleData.url,
         title: articleData.title,
         content: articleData.content,
         user_id: user_id,
+        tags: generatedTags,
       },
     ]);
+
     if (error) {
       console.error("Couldn't add bookmark:", error);
       setLoading(false);
     } else {
       setBookmarked(true);
+      setShowTags(true);
       setLoading(false);
     }
   };
@@ -83,7 +125,6 @@ const BookmarkToggle: React.FC<Props> = ({ theme, articleData }) => {
   };
 
   const handleToggle = async () => {
-    // if bookmarked, remove bookmark
     if (bookmarked) {
       await removeBookmark();
     } else {
@@ -113,14 +154,51 @@ const BookmarkToggle: React.FC<Props> = ({ theme, articleData }) => {
   );
 
   return (
-    <button
-      onClick={handleToggle}
-      disabled={loading}
-      className={`flex items-center mt-4 transition-colors duration-200 ${baseColor} ${hoverColor}`}
-      aria-label={bookmarked ? 'Remove Bookmark' : 'Add Bookmark'}>
-      {bookmarked ? FilledBookmarkIcon : OutlineBookmarkIcon}
-      <span className="ml-1 text-sm">{bookmarked ? 'Article has been saved' : 'Bookmark article'}</span>
-    </button>
+    <div className="mt-4">
+      <div className="flex justify-between items-center">
+        <button
+          onClick={handleToggle}
+          disabled={loading}
+          className={`flex items-center transition-colors duration-200 ${baseColor} ${hoverColor}`}
+          aria-label={bookmarked ? 'Remove Bookmark' : 'Add Bookmark'}>
+          {loading ? (
+            <span className="ml-1 text-sm">Processing...</span>
+          ) : (
+            <>
+              {bookmarked ? FilledBookmarkIcon : OutlineBookmarkIcon}
+              <span className="ml-1 text-sm">{bookmarked ? 'Article has been saved' : 'Bookmark article'}</span>
+            </>
+          )}
+        </button>
+        {bookmarked && (
+          <button
+            onClick={() => setShowTags(!showTags)}
+            disabled={loading || !bookmarked}
+            className={`flex items-center transition-colors duration-200 ${baseColor} ${hoverColor}`}
+            aria-label="Toggle Display Tags">
+            <span className="text-sm">Display tags</span>
+          </button>
+        )}
+      </div>
+
+      {/* Tags Panel */}
+      {bookmarked && showTags && (
+        <div className="mt-2 p-2  rounded-md">
+          <div className="flex flex-wrap gap-2">
+            {tags.map((tag, index) => (
+              <span
+                key={index}
+                className={`px-2 py-1 text-xs rounded-full ${
+                  theme === 'light' ? 'bg-blue-100 text-blue-800' : 'bg-blue-500 text-blue-50'
+                }`}>
+                {tag}
+              </span>
+            ))}
+          </div>
+          {tagError && <p className="text-xs text-red-500 dark:text-red-400 mt-1">{tagError}</p>}
+        </div>
+      )}
+    </div>
   );
 };
 
