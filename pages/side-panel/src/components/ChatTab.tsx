@@ -9,149 +9,153 @@ interface ChatTabProps {
   theme: 'light' | 'dark';
 }
 
-interface Message {
+export interface Message {
   sender: 'bot' | 'user';
   text: string;
   usedGeneralKnowledge?: boolean;
   sources?: Array<{ title: string; url: string }>;
   isTyping?: boolean;
-}
-
-interface Suggestion {
-  text: string;
-  onClick: () => void;
+  isTeacherMode?: boolean;
 }
 
 const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => {
+  // Normal conversation messages (kept unchanged for non-teacher mode)
   const [messages, setMessages] = useState<Message[]>([
     {
       sender: 'bot',
       text: 'Hi there! I can help you understand this article better. Ask me anything about it.',
     },
   ]);
+  // Teacher mode conversation messages
+  const [teacherMessages, setTeacherMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastProcessedTextRef = useRef<string>('');
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [useEnhancedChat, setUseEnhancedChat] = useState<boolean>(true);
+  const [useEnhancedChat, setUseEnhancedChat] = useState<boolean>(false);
+  const [useTeacherMode, setUseTeacherMode] = useState<boolean>(false);
 
-  // Scroll to bottom when messages change
+  // Always scroll to the bottom on new messages.
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, teacherMessages]);
 
-  // Listen for selected text from context menu
+  // Display conversation based on mode.
+  const displayedMessages = useTeacherMode ? teacherMessages : messages;
+
+  // --- Helper: Update state based on current mode ---
+  const updateMessageState = (newMessages: Message[], isTeacher: boolean) => {
+    if (isTeacher) {
+      setTeacherMessages(newMessages);
+    } else {
+      setMessages(newMessages);
+    }
+  };
+
+  // --- Toggling Teacher Mode ---
+  const toggleTeacherMode = () => {
+    if (!useTeacherMode && teacherMessages.length === 0) {
+      // Only add the activation message once (as the first teacher message)
+      setTeacherMessages([
+        {
+          sender: 'bot',
+          text: 'Teacher mode activated. I will help you understand concepts through guided questioning and discussion.',
+          isTeacherMode: true,
+        },
+      ]);
+    }
+    // Toggle the flag.
+    setUseTeacherMode(!useTeacherMode);
+  };
+
+  // --- Handling selected text (remains unchanged, except for mode-specific updates) ---
   useEffect(() => {
-    // Function to handle selected text from storage or messages
-    const processSelectedText = (text: string, paragraph: string = '', title: string = '', mode: string = 'simple') => {
+    const processSelectedText = (text: string, paragraph = '', title = '', mode = 'simple') => {
       if (text && text.trim()) {
         handleSelectedText(text, paragraph, title, mode);
       }
     };
 
-    // Check for stored selected text first (for when side panel is opened by context menu)
     const checkStoredText = () => {
       chrome.storage.local.get(['selectedTextForExplanation'], result => {
         if (result.selectedTextForExplanation) {
           const { text, paragraph, title, mode, timestamp } = result.selectedTextForExplanation;
-
-          // Only process if it's recent (within last 10 seconds)
           const now = Date.now();
           if (now - timestamp < 10000) {
-            // Clear the stored text to prevent duplicate processing
             chrome.storage.local.remove(['selectedTextForExplanation']);
-
-            // Process the selected text with context and mode
             processSelectedText(text, paragraph, title, mode);
           }
         }
       });
     };
 
-    // Check immediately when component mounts
     checkStoredText();
 
-    // Listen for messages from background script
     const messageListener = (
       message: any,
       sender: chrome.runtime.MessageSender,
       sendResponse: (response?: any) => void,
     ) => {
       console.log('Received message in ChatTab:', message);
-
       if (message.action === 'sendSelectedText' && message.text) {
         processSelectedText(message.text, message.paragraph, message.title, message.mode);
-        // Send a response to acknowledge receipt
         sendResponse({ status: 'received' });
-        return true; // Indicates async response
+        return true;
       }
-
-      // Return false for messages we don't handle
       return false;
     };
 
-    // Add the listener
     chrome.runtime.onMessage.addListener(messageListener);
-
-    // Set up a periodic check for new selected text (as a backup)
     const intervalId = setInterval(checkStoredText, 1000);
 
-    // Clean up listener and interval on unmount
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
       clearInterval(intervalId);
     };
-  }, [articleData]); // Re-run when articleData changes
+  }, [articleData]);
 
-  const handleSelectedText = (
-    selectedText: string,
-    paragraph: string = '',
-    title: string = '',
-    mode: string = 'simple',
-  ) => {
-    // Prevent processing the same text multiple times
+  const handleSelectedText = (selectedText: string, paragraph = '', title = '', mode = 'simple') => {
     const textSignature = `${selectedText}:${mode}`;
-    if (textSignature === lastProcessedTextRef.current) {
-      return;
-    }
+    if (textSignature === lastProcessedTextRef.current) return;
     lastProcessedTextRef.current = textSignature;
-
-    // Format the message to indicate it's an explanation request with the selected mode
     const formattedMessage = `Explain (${mode}): ${selectedText}`;
-
-    // Create explanation context
     const explanationContext = {
       text: selectedText,
-      paragraph: paragraph,
+      paragraph,
       title: title || articleData?.title || '',
-      mode: mode,
+      mode,
     };
-
-    // Send the explanation request
     sendExplanationRequest(formattedMessage, explanationContext);
   };
 
+  // --- Sending Explanation Requests ---
   const sendExplanationRequest = (formattedMessage: string, context: any) => {
-    // Add user message
-    setMessages(prev => [...prev, { sender: 'user', text: formattedMessage }]);
-
-    // Add typing indicator for bot
-    const typingMessage: Message = { sender: 'bot', text: '...', isTyping: true };
-    setMessages(prev => [...prev, typingMessage]);
+    if (useTeacherMode) {
+      setTeacherMessages(prev => [
+        ...prev,
+        { sender: 'user', text: formattedMessage },
+        { sender: 'bot', text: '...', isTyping: true },
+      ]);
+    } else {
+      setMessages(prev => [
+        ...prev,
+        { sender: 'user', text: formattedMessage },
+        { sender: 'bot', text: '...', isTyping: true },
+      ]);
+    }
 
     if (!articleData || !articleData.content) {
-      // Replace typing indicator with an error message
-      setMessages(prev => {
+      updateMessageState(prev => {
         const newMessages = [...prev];
         newMessages[newMessages.length - 1] = {
           sender: 'bot',
           text: "Sorry, I couldn't extract any content from this page.",
         };
         return newMessages;
-      });
+      }, useTeacherMode);
       return;
     }
 
@@ -167,183 +171,159 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
     fetch(`${apiBaseUrl}/api/explain`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestData),
     })
       .then(response => {
-        if (!response.ok) {
-          throw new Error(`Network response was not ok: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
         return response.json();
       })
       .then(data => {
-        setMessages(prev => {
-          const newMessages = [...prev];
-          // Remove typing indicator (last message)
-          newMessages.pop();
-          if (data.response) {
-            newMessages.push({ sender: 'bot', text: data.response });
-          } else if (data.error) {
-            newMessages.push({ sender: 'bot', text: `Error: ${data.error}` });
-          }
-          return newMessages;
-        });
+        if (useTeacherMode) {
+          setTeacherMessages(prev => {
+            const newMessages = [...prev];
+            newMessages.pop(); // remove typing indicator
+            if (data.response) {
+              newMessages.push({ sender: 'bot', text: data.response, isTeacherMode: true });
+            } else if (data.error) {
+              newMessages.push({ sender: 'bot', text: `Error: ${data.error}`, isTeacherMode: true });
+            }
+            return newMessages;
+          });
+        } else {
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages.pop();
+            if (data.response) {
+              newMessages.push({ sender: 'bot', text: data.response });
+            } else if (data.error) {
+              newMessages.push({ sender: 'bot', text: `Error: ${data.error}` });
+            }
+            return newMessages;
+          });
+        }
       })
       .catch(error => {
         console.error('Error:', error);
+        if (useTeacherMode) {
+          setTeacherMessages(prev => {
+            const newMessages = [...prev];
+            newMessages.pop();
+            newMessages.push({
+              sender: 'bot',
+              text: 'Sorry, I encountered an error while processing your request.',
+              isTeacherMode: true,
+            });
+            return newMessages;
+          });
+        } else {
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages.pop();
+            newMessages.push({
+              sender: 'bot',
+              text: 'Sorry, I encountered an error while processing your request.',
+            });
+            return newMessages;
+          });
+        }
+      });
+  };
+
+  // --- Sending regular user messages ---
+  const sendMessageWithText = (text: string) => {
+    setInputValue('');
+    if (useTeacherMode) {
+      setTeacherMessages(prev => [...prev, { sender: 'user', text }, { sender: 'bot', text: '...', isTyping: true }]);
+      sendTeacherMessage(text);
+    } else {
+      setMessages(prev => [...prev, { sender: 'user', text }, { sender: 'bot', text: '...', isTyping: true }]);
+      if (useEnhancedChat) {
+        sendEnhancedChatMessage(text);
+      } else if (!articleData || !articleData.content) {
         setMessages(prev => {
           const newMessages = [...prev];
-          newMessages.pop();
-          newMessages.push({ sender: 'bot', text: 'Sorry, I encountered an error while processing your request.' });
+          newMessages[newMessages.length - 1] = {
+            sender: 'bot',
+            text: "Sorry, I couldn't extract any content from this page.",
+          };
           return newMessages;
         });
-      });
-  };
-
-  const sendMessage = () => {
-    const trimmed = inputValue.trim();
-    if (!trimmed) return;
-
-    // Check if this is an explanation request
-    if (trimmed.startsWith('Explain (') && trimmed.includes('): ')) {
-      // Extract the explanation context from the message
-      const modeMatch = trimmed.match(/Explain \(([^)]+)\):/);
-      const mode = modeMatch ? modeMatch[1] : 'simple';
-      const text = trimmed.split('): ')[1];
-
-      // Create explanation context
-      const explanationContext = {
-        text: text,
-        paragraph: '',
-        title: articleData?.title || '',
-        mode: mode,
-      };
-
-      // Send as an explanation request
-      sendExplanationRequest(trimmed, explanationContext);
-    } else {
-      // Send as a regular chat message
-      sendMessageWithText(trimmed);
-    }
-  };
-
-  const sendMessageWithText = (text: string) => {
-    // Add user message
-    setMessages(prev => [...prev, { sender: 'user', text: text }]);
-    setInputValue('');
-
-    // Add typing indicator for bot
-    const typingMessage: Message = { sender: 'bot', text: '...', isTyping: true };
-    setMessages(prev => [...prev, typingMessage]);
-
-    if (useEnhancedChat) {
-      // Use the enhanced chat that searches across all articles
-      sendEnhancedChatMessage(text);
-    } else if (!articleData || !articleData.content) {
-      // Replace typing indicator with an error message
-      setMessages(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          sender: 'bot',
-          text: "Sorry, I couldn't extract any content from this page.",
-        };
-        return newMessages;
-      });
-      return;
-    } else {
-      // Use the regular chat that only works with the current article
-      sendRegularChatMessage(text);
-    }
-  };
-
-  const sendEnhancedChatMessage = async (text: string) => {
-    try {
-      // Get conversation history from previous messages
-      const conversationHistory = messages
-        .filter(msg => !msg.isTyping) // Skip typing indicators
-        .map(msg => ({
-          role: msg.sender === 'user' ? ('user' as const) : ('assistant' as const),
-          content: msg.text,
-        }));
-
-      // Call the enhanced chat API
-      const response = await enhancedChat(
-        text,
-        conversationId,
-        conversationHistory,
-        articleData?.url, // Use URL instead of ID since it's available and can work as an identifier
-        articleData?.content,
-      );
-
-      // Update conversation ID for continuity
-      if (response.conversation_id) {
-        setConversationId(response.conversation_id);
-      }
-
-      // Set suggestions if available
-      if (response.suggestions && response.suggestions.length > 0) {
-        setSuggestions(response.suggestions);
+        return;
       } else {
-        setSuggestions([]);
+        sendRegularChatMessage(text);
       }
+    }
+  };
 
-      // Update messages with response
-      setMessages(prev => {
+  // --- Teacher Chat ---
+  const sendTeacherMessage = async (text: string) => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/teacher_chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          articleContent: articleData!.content,
+          articleTitle: articleData!.title,
+          articleUrl: articleData!.url,
+          conversationHistory: teacherMessages
+            .filter(msg => !msg.isTyping)
+            .map(msg => ({
+              role: msg.sender === 'user' ? 'user' : 'assistant',
+              content: msg.text,
+            })),
+        }),
+      });
+      if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
+      const data = await response.json();
+      setTeacherMessages(prev => {
         const newMessages = [...prev];
-        // Remove typing indicator (last message)
-        newMessages.pop();
-        if (response.response) {
-          newMessages.push({
-            sender: 'bot',
-            text: response.response,
-            sources: response.sources,
-          });
-        } else if (response.error) {
-          newMessages.push({ sender: 'bot', text: `Error: ${response.error}` });
+        newMessages.pop(); // remove typing indicator
+        if (data.response) {
+          newMessages.push({ sender: 'bot', text: data.response, isTeacherMode: true });
+        } else if (data.error) {
+          newMessages.push({ sender: 'bot', text: `Error: ${data.error}`, isTeacherMode: true });
         }
         return newMessages;
       });
     } catch (error) {
-      console.error('Error in enhanced chat:', error);
-      setMessages(prev => {
+      console.error('Error:', error);
+      setTeacherMessages(prev => {
         const newMessages = [...prev];
         newMessages.pop();
         newMessages.push({
           sender: 'bot',
-          text: 'Sorry, I encountered an error while searching across your articles.',
+          text: 'Sorry, I encountered an error while processing your request.',
+          isTeacherMode: true,
         });
         return newMessages;
       });
     }
   };
 
+  // --- Regular Chat (non-teacher) ---
   const sendRegularChatMessage = (text: string) => {
     const requestData = {
       message: text,
       articleContent: articleData!.content,
       articleTitle: articleData!.title,
       articleUrl: articleData!.url,
+      teacherMode: false,
     };
 
     fetch(`${apiBaseUrl}/api/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestData),
     })
       .then(response => {
-        if (!response.ok) {
-          throw new Error(`Network response was not ok: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
         return response.json();
       })
       .then(data => {
         setMessages(prev => {
           const newMessages = [...prev];
-          // Remove typing indicator (last message)
           newMessages.pop();
           if (data.response) {
             newMessages.push({ sender: 'bot', text: data.response, usedGeneralKnowledge: data.usedGeneralKnowledge });
@@ -364,6 +344,51 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
       });
   };
 
+  // --- Enhanced Chat (non-teacher) ---
+  const sendEnhancedChatMessage = async (text: string) => {
+    try {
+      const conversationHistory = messages
+        .filter(msg => !msg.isTyping)
+        .map(msg => ({
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: msg.text,
+        }));
+      const response = await enhancedChat(
+        text,
+        conversationId,
+        conversationHistory,
+        articleData?.url,
+        articleData?.content,
+        false, // not teacher mode
+      );
+      if (response.conversation_id) {
+        setConversationId(response.conversation_id);
+      }
+      setSuggestions(response.suggestions && response.suggestions.length > 0 ? response.suggestions : []);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages.pop();
+        if (response.response) {
+          newMessages.push({ sender: 'bot', text: response.response, sources: response.sources });
+        } else if (response.error) {
+          newMessages.push({ sender: 'bot', text: `Error: ${response.error}` });
+        }
+        return newMessages;
+      });
+    } catch (error) {
+      console.error('Error in enhanced chat:', error);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages.pop();
+        newMessages.push({
+          sender: 'bot',
+          text: 'Sorry, I encountered an error while searching across your articles.',
+        });
+        return newMessages;
+      });
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -371,7 +396,27 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
     }
   };
 
-  // Toggle between enhanced mode and regular mode
+  const sendMessage = () => {
+    const trimmed = inputValue.trim();
+    if (!trimmed) return;
+
+    if (trimmed.startsWith('Explain (') && trimmed.includes('): ')) {
+      const modeMatch = trimmed.match(/Explain \(([^)]+)\):/);
+      const mode = modeMatch ? modeMatch[1] : 'simple';
+      const text = trimmed.split('): ')[1];
+      const explanationContext = {
+        text,
+        paragraph: '',
+        title: articleData?.title || '',
+        mode,
+      };
+      sendExplanationRequest(trimmed, explanationContext);
+    } else {
+      sendMessageWithText(trimmed);
+    }
+  };
+
+  // --- Toggle between enhanced and regular (non-teacher) modes ---
   const toggleChatMode = () => {
     setUseEnhancedChat(!useEnhancedChat);
     setMessages(prev => [
@@ -385,34 +430,32 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
     ]);
   };
 
-  // Function to handle clicking a suggestion
-  const handleSuggestionClick = (suggestion: string) => {
-    setInputValue(suggestion);
-    // Optionally, auto-send the suggestion
-    // sendMessageWithText(suggestion);
-  };
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
-        {messages.map((msg, index) => (
+        {displayedMessages.map((msg, index) => (
           <div
             key={index}
             className={`p-3 rounded-lg ${
-              msg.sender === 'user' ? 'bg-blue-100 dark:bg-blue-900 ml-auto' : 'bg-gray-100 dark:bg-gray-800 mr-auto'
-            } ${theme === 'dark' ? 'text-white' : 'text-gray-800'} max-w-[85%]`}>
+              // For normal mode, use blue tones; for teacher mode, use green.
+              useTeacherMode
+                ? theme === 'dark'
+                  ? 'bg-green-900'
+                  : 'bg-green-100'
+                : theme === 'dark'
+                  ? 'bg-blue-900'
+                  : 'bg-blue-100'
+            } ${msg.sender === 'user' ? 'ml-auto' : 'mr-auto'} max-w-[85%] ${
+              theme === 'dark' ? 'text-white' : 'text-gray-800'
+            }`}>
             <div>{msg.text}</div>
-
-            {/* Show general knowledge disclaimer if relevant */}
             {msg.usedGeneralKnowledge && (
-              <div className="text-xs mt-2 italic text-gray-500 dark:text-gray-400">
+              <div className="text-xs mt-2 italic text-gray-500">
                 This response includes general knowledge not found in the article.
               </div>
             )}
-
-            {/* Show sources if available */}
             {msg.sources && msg.sources.length > 0 && (
-              <div className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+              <div className="text-xs mt-2 text-gray-500">
                 <div className="font-medium">Sources:</div>
                 <ul className="list-disc pl-4">
                   {msg.sources.map((source, idx) => (
@@ -431,38 +474,56 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
             )}
           </div>
         ))}
-
-        {/* Suggestions */}
         {suggestions.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {suggestions.map((suggestion, index) => (
               <button
                 key={index}
-                className="px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                onClick={() => handleSuggestionClick(suggestion)}>
+                className={`px-3 py-1 text-sm ${
+                  theme === 'dark'
+                    ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                    : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                } rounded-full transition-colors`}
+                onClick={() => setInputValue(suggestion)}>
                 {suggestion}
               </button>
             ))}
           </div>
         )}
-
         <div ref={messagesEndRef} />
       </div>
-
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-        {/* Mode toggle */}
-        <div className="flex justify-between items-center mb-2">
-          <button
-            className={`text-xs px-2 py-1 rounded ${
-              useEnhancedChat
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
-            }`}
-            onClick={toggleChatMode}>
-            {useEnhancedChat ? 'Enhanced Mode (All Articles)' : 'Regular Mode (Current Article)'}
-          </button>
+      <div className={`p-4 border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
+        <div className="flex justify-between items-center mb-2 gap-2">
+          <div className="flex gap-2">
+            <button
+              className={`text-xs px-2 py-1 rounded ${
+                useEnhancedChat
+                  ? 'bg-blue-500 text-white'
+                  : theme === 'dark'
+                    ? 'bg-gray-700 text-gray-200'
+                    : 'bg-gray-200 text-gray-800'
+              }`}
+              onClick={toggleChatMode}>
+              {useEnhancedChat ? 'Enhanced Mode (All Articles)' : 'Regular Mode (Current Article)'}
+            </button>
+            <button
+              className={`text-xs px-2 py-1 rounded ${
+                // Teacher mode toggle button (always blue when off, green when on)
+                useTeacherMode
+                  ? theme === 'dark'
+                    ? 'bg-green-700 text-white'
+                    : 'bg-green-500 text-white'
+                  : theme === 'dark'
+                    ? 'bg-blue-700 text-white'
+                    : 'bg-blue-500 text-white'
+              }`}
+              onClick={toggleTeacherMode}>
+              {useTeacherMode ? '🧑‍🏫 Teacher Mode' : 'Regular Mode'}
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Input box remains neutral (theme-dependent only) */}
           <textarea
             className={`w-full p-2 border rounded-lg resize-none ${
               theme === 'dark' ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-gray-800 border-gray-300'
