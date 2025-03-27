@@ -1,54 +1,69 @@
-# BetterReader Chrome Extension
 
-A Chrome extension that enhances article reading by providing a sleek chat interface in a side panel, powered by Google's Gemini AI.
+# BetterReader
+
+**BetterReader** is an open-source browser extension and website that serves as your AI copilot for reading, research, and learning across the web. Whether you're diving into technical papers, news articles, or blog posts, BetterReader helps you understand content more deeply through conversation, quizzes, and interactive tools.
+
+BetterReader supports both online usage (via browser extension stores) and local usage by allowing users to configure their own LLM API keys.
+
+> [!IMPORTANT]
+> **BetterReader is currently in early development.**  
+> It is not yet available on browser extension stores. However, you can set up and run the extension locally using this repository. It currently supports Chrome-based browsers.
+
 
 ## Features
 
-- **Side Panel Interface**: Access the extension via a sidebar in Chrome
-- **AI-Powered Chat**: Ask questions about the current article and get intelligent responses from Gemini AI
-- **Quiz & Chat**: Test your knowledge with AI-generated quiz questions and discuss them in the Learning tab
+- **Chat:** Engage in a conversation with the extension about the current article. BetterRead can help answer questions and give examples, counterarguments, and clarifications. Additionally, BetterReader remembers past articles you have read, helping you get a comprehensive understanding on any topic.   
+- **Teacher Mode**:   A chat mode that uses the Socratic method to guide you through thought-provoking questions that deepen understanding and encourage critical thinking.
+- **Summary:** Generate a concise summary of any article, including key definitions, key topics, and exploration questions to guide your learning.
+- **Quiz Mode:** Test your understanding with custom-generated quizzes based on the content tailored to your experience with the topic.
+- **Highlights & Annotations:** Highlight and annotate article text in different colors to revisit and organize key points.
+- **Research Assistant:** Instantly search for related articles and sources to broaden your perspective and deepen your research.
+- **ELI5:** Highlight confusing sections of text and click the ELI5 (Explain Like I'm 5) button to receive simple, accessible explanations.
 
-## How to Install
 
-1. Clone or download this repository
-2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable "Developer mode" in the top right
-4. Click "Load unpacked" and select the folder containing this extension
-5. The BetterReader extension will be added to your browser
+## Why BetterReader?
 
-## How to Use
+Why choose BetterReader over other AI reading assistants?
 
-1. Start the Python backend server:
-   ```
-   ./start_server.sh
-   ```
-2. Navigate to any article or text-based webpage
-3. Click the BetterReader icon in your extensions toolbar
-4. The side panel will open, showing the chat interface
-5. Ask questions about the content or switch to the Learning tab for quiz and chat
-6. In the Learning tab, you can:
-   - Generate quiz questions about the article
-   - Create custom quizzes by providing specific prompts
-   - Answer multiple-choice questions and get immediate feedback
-   - Chat with the AI about the quiz or article content
+- **🎓 A Learning-Focused Experience:**  
+  Unlike other AI tools that focus on quick summaries, BetterReader is built to enhance comprehension and long-term learning. It's designed for students, researchers, and curious minds who want to *understand*, not just *skim*.
+  
+- **🧰 All-in-One Toolkit:**  
+  BetterReader combines summarization, chat, annotation, quiz generation, and research discovery into a single seamless interface—no need to juggle multiple extensions or apps.
+  
+- **🌍 Open Source:**  
+  Transparent, customizable, and community-driven. BetterReader is open-source under the MIT license, so you can modify, contribute, or self-host it however you like.
 
-## Files
+- **💻 Run Locally:**  
+  Don't want to rely on third-party APIs or share your data? BetterReader allows you to bring your own API keys (e.g., Google Gemini) and run everything locally for full control over privacy and costs. 
 
-- `manifest.json`: Extension configuration
-- `background.js`: Background service worker for extension functionality
-- `content.js`: Script that runs in the context of web pages
-- `sidepanel.html`: HTML structure for the side panel
-- `sidepanel.js`: JavaScript for the side panel functionality
-- `server.py`: Python backend server with Gemini AI integration
-- `requirements.txt`: Python dependencies
-- `start_server.sh`: Script to start the Python server
-- `icon.png`: Extension icon
+---
 
-## Requirements
+## Future Development
 
-- Python 3.7+
-- Flask
-- Chrome browser
-- Internet connection for Gemini API access
+Here's what's coming soon:
 
-MIT
+- **📄 PDF Support:**  
+  Read, annotate, and analyze PDFs just like you would any webpage.
+
+- **🧠 Connect to Local Models:**  
+  Support for integrating with local LLMs (e.g., via Ollama, LM Studio, or open-source models) for a fully offline, private experience.
+
+- **☁️ Online Hosting & User Accounts:**  
+  Host BetterReader online with user accounts, saving highlights, chat history, and personalized learning journeys across devices.
+
+## Tech Stack
+
+- Extension: Typescript + React.js + Tailwind
+- Website: Typescript + Next.js + Tailwind
+- Server: Python + Flask
+- Database + Auth: Supabase
+- Browser Extension Boilerplate: 
+
+## Contributing
+
+Contributions are welcome! While we are still in an early stage, if you're interested in helping us build BetterReader, please contact us and we can help you get started. 
+
+
+## License  
+BetterReader is released under the Apache 2.0 license. 
