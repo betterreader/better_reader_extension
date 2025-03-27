@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import datetime
 from functools import wraps
 import openai
-from flask import g
+from flask import Flask, request, jsonify, g
 import atexit
 import multiprocessing
 import nltk
@@ -1500,7 +1500,7 @@ def enhanced_chat():
     
     message = data['message']
     
-    article_content = data['articleContent']
+    article_content = data.get('articleContent', '')
     article_title = data.get('articleTitle', '')
     article_url = data.get('articleUrl', '')
     quiz_context = data.get('quizContext', '')
@@ -1542,7 +1542,7 @@ def enhanced_chat():
             "summarize this article",
             "summarize this"
         ]:
-            is_about_current_article = True
+            is_about_current_article = True and article_content
             print("User is asking about the current article")
         else:
             # Check if the query contains keywords from the article
@@ -2277,4 +2277,3 @@ Respond with just your next message in the conversation."""
 if __name__ == '__main__':
     print(f"Starting server on port {PORT}...")
     app.run(debug=True, host='0.0.0.0', port=PORT)
-
