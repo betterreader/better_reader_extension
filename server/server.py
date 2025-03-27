@@ -286,7 +286,7 @@ def calculate_importance_score(segment: str) -> float:
     # Normalize to ensure we don't exceed 2.0
     return min(2.0, max(0.5, score))
 
-def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> List[Dict[str, Any]]:
+def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200, max_segments: int = 10) -> List[Dict[str, Any]]:
     """
     Segment article text into overlapping chunks for embedding.
     
@@ -294,6 +294,7 @@ def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> L
         text: The article text to segment
         max_chunk_size: Maximum size of each chunk in characters
         overlap: Number of characters to overlap between chunks
+        max_segments: Maximum number of segments to create (default: 10)
         
     Returns:
         List of dictionaries containing segment text and metadata
@@ -303,9 +304,11 @@ def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> L
     
     # Initialize segments
     segments = []
+    print(f"Segmenting text of length {len(text)} characters with max {max_segments} segments")
     
     # If text is shorter than max_chunk_size, return it as a single segment
     if len(text) <= max_chunk_size:
+        print("Text shorter than max_chunk_size, creating single segment")
         segment_text = text.strip()
         keywords = extract_keywords(segment_text)
         importance = calculate_importance_score(segment_text)
@@ -315,24 +318,56 @@ def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> L
             'keywords': keywords,
             'importance_score': importance
         })
+        print("Created 1 segment")
         return segments
+    
+    # For longer text, divide it into at most max_segments segments
+    # Calculate adaptive chunk size based on text length and max segments
+    text_length = len(text)
+    adapted_chunk_size = max(max_chunk_size, text_length // max_segments)
+    adapted_overlap = min(overlap, adapted_chunk_size // 4)  # 25% of chunk size max
+    
+    print(f"Using adaptive chunk size: {adapted_chunk_size}, overlap: {adapted_overlap}")
     
     # Otherwise, segment the text with overlap
     start = 0
-    while start < len(text):
-        # Get the chunk
-        end = min(start + max_chunk_size, len(text))
+    segment_count = 0
+    
+    while start < len(text) and segment_count < max_segments:
+        # Calculate remaining text and segments
+        remaining_text = len(text) - start
+        remaining_segments = max_segments - segment_count
         
-        # If this is not the last chunk, try to find a natural break point
-        if end < len(text):
-            # Look for the last period, question mark, or exclamation point
-            for i in range(min(end + 100, len(text)), max(start + 200, end - 200), -1):
-                if i < len(text) and text[i] in '.!?':
-                    end = i + 1
-                    break
+        # For the last segment, just take all remaining text
+        if remaining_segments == 1:
+            end = len(text)
+            print(f"Last segment, taking all remaining text from {start} to {end}")
+        else:
+            # Otherwise, calculate proportional chunk size
+            # This ensures we cover the whole text with the remaining segments
+            proportional_size = remaining_text // remaining_segments
+            # But don't make chunks smaller than adapted_chunk_size unless necessary
+            chunk_size = max(proportional_size, min(adapted_chunk_size, remaining_text))
+            end = min(start + chunk_size, len(text))
+            
+            # If this is not the last chunk, try to find a natural break point
+            if end < len(text):
+                # Look for the last period, question mark, or exclamation point
+                # within a reasonable range after the proposed end
+                search_end = min(len(text) - 1, end + adapted_overlap)
+                search_start = max(start + 100, end - adapted_overlap)
+                
+                # Make sure we have a valid range
+                if search_start < search_end:
+                    for i in range(search_end, search_start, -1):
+                        if i < len(text) and text[i] in '.!?':
+                            end = i + 1
+                            print(f"Found natural break at position {i}: '{text[i]}'")
+                            break
         
         # Extract the segment
         segment_text = text[start:end].strip()
+        print(f"Created segment {segment_count+1}: positions {start}-{end}, length {len(segment_text)}")
         
         # Extract keywords and calculate importance
         keywords = extract_keywords(segment_text)
@@ -345,9 +380,32 @@ def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200) -> L
             'importance_score': importance
         })
         
-        # Move the start pointer for the next segment
-        start = end - overlap
+        segment_count += 1
+        
+        # If this is our last allowable segment but we haven't reached the end
+        # of text, extend this segment to include all remaining text
+        if segment_count == max_segments and end < len(text):
+            print(f"Reached max segments ({max_segments}), extending last segment to include remaining text")
+            # Update the last segment to include all remaining text
+            last_segment = segments[-1]
+            extended_text = text[start:]
+            last_segment['text'] = extended_text
+            # Recalculate keywords and importance for extended text
+            last_segment['keywords'] = extract_keywords(extended_text)
+            last_segment['importance_score'] = calculate_importance_score(extended_text)
+            break
+        
+        # Move the start pointer for the next segment, ensuring forward progress
+        old_start = start
+        start = end - adapted_overlap
+        
+        # Safety check: if we're not moving forward enough, force larger progress
+        if start <= old_start or (start - old_start) < 10:
+            # Ensure significant forward progress (at least 10% of the chunk size)
+            start = old_start + max(adapted_chunk_size // 10, 10)
+            print(f"Forced progress: old_start={old_start}, new_start={start}")
     
+    print(f"Segmentation complete: created {len(segments)} segments")
     return segments
 
 def generate_embedding(text: str) -> List[float]:
