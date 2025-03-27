@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ToggleButton } from '@extension/ui';
 import { getSupabaseClient } from '@extension/shared/lib/utils/supabaseClient';
 
@@ -25,7 +25,19 @@ const GearIcon: React.FC<React.SVGProps<SVGSVGElement>> = props => {
 
 const SettingsDropdown: React.FC<SettingsDropdownProps> = ({ theme }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const supabase = getSupabaseClient();
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -42,7 +54,7 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({ theme }) => {
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`p-2 rounded-full hover:bg-opacity-10 hover:bg-gray-500 transition-colors`}>
