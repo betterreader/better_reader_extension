@@ -247,7 +247,7 @@ const App: React.FC<SidePanelProps> = ({ session }) => {
           />
         </div>
         <div className={`h-full ${activeTab !== 'notes' ? 'hidden' : ''}`}>
-          <NotesTab key={articleData?.url || 'no-article'} theme={theme} session={session} />
+          <NotesTab key={articleData?.url || 'no-article'} url={articleData?.url} theme={theme} session={session} />
         </div>
         <div className={`h-full ${activeTab !== 'research' ? 'hidden' : ''}`}>
           <ResearchTab

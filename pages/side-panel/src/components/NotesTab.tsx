@@ -8,15 +8,15 @@ import {
 } from '@extension/shared';
 import { getSupabaseClient } from '@extension/shared/lib/utils/supabaseClient';
 interface NotesTabProps {
+  url: string | undefined;
   theme: 'light' | 'dark';
   session: Session | null;
 }
 
 const supabase = getSupabaseClient();
 
-const NotesTab: React.FC<NotesTabProps> = ({ theme, session }) => {
+const NotesTab: React.FC<NotesTabProps> = ({ url, theme, session }) => {
   const [highlights, setHighlights] = useState<HighlightData[]>([]);
-  const [currentUrl, setCurrentUrl] = useState<string>('');
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [commentText, setCommentText] = useState<string>('');
   const notesContainerRef = useRef<HTMLDivElement>(null);
@@ -150,7 +150,6 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme, session }) => {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs[0]?.url) {
         const url = tabs[0].url;
-        setCurrentUrl(url);
         await loadHighlights(url);
       }
     };
@@ -171,8 +170,10 @@ const NotesTab: React.FC<NotesTabProps> = ({ theme, session }) => {
 
       if (message.type === 'HIGHLIGHT_TEXT_RUNTIME') {
         const customMessage = message as HighlightEventRuntime;
-        if (customMessage.url !== currentUrl) {
+        if (customMessage.url !== url) {
           console.log('NoteTab: Ignoring highlight data for different URL');
+          console.log('NoteTab: Current URL:', url);
+          console.log('NoteTab: Custom message URL:', customMessage.url);
           return;
         }
         console.log('NoteTab: Processing highlight data:', message);
