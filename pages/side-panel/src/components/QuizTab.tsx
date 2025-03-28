@@ -30,6 +30,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
   const [showLevelDialog, setShowLevelDialog] = useState(false);
   const [selectedLevel, setSelectedLevel] = useState<string>('');
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
+  const [shouldScroll, setShouldScroll] = useState(false);
   const quizContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -37,16 +38,6 @@ const QuizTab: React.FC<QuizTabProps> = ({
       quizContainerRef.current.scrollTop = quizContainerRef.current.scrollHeight;
     }
   };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [quizMessages]);
-
-  useEffect(() => {
-    if (currentQuizData) {
-      setTimeout(scrollToBottom, 100); // Add a small delay to ensure content is rendered
-    }
-  }, [currentQuizData]);
 
   // Initialize question states when quiz data changes
   useEffect(() => {
@@ -65,6 +56,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
   const generateQuiz = (prompt: string = '', level: string = '') => {
     // Append a loading message
     setQuizMessages(prev => [...prev, { sender: 'bot', text: 'Generating quiz questions...' }]);
+    setShouldScroll(true); // Request scroll when quiz is generated
 
     if (!articleData || !articleData.content) {
       setQuizMessages(prev => {
@@ -84,6 +76,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
       articleTitle: articleData.title,
       articleUrl: articleData.url,
       timestamp: timestamp,
+      randomSeed: Math.random(), // add randomness to the request
     };
 
     if (prompt) {
@@ -141,21 +134,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
       });
   };
 
-  const displayQuiz = (quizData: QuizData, prompt: string, level: string = '') => {
-    let introText = '';
-
-    if (prompt) {
-      introText = `Here are some quiz questions based on your request: "${prompt}"`;
-    } else {
-      introText = 'Here are some quiz questions based on the article:';
-    }
-
-    if (level) {
-      introText += ` (${level} level)`;
-    }
-
-    setQuizMessages(prev => [...prev, { sender: 'bot', text: introText }]);
-  };
+  const displayQuiz = (quizData: QuizData, prompt: string, level: string = '') => {};
 
   const handleOptionSelection = (questionIndex: number, optionIndex: number) => {
     if (!currentQuizData) return;
@@ -285,8 +264,8 @@ const QuizTab: React.FC<QuizTabProps> = ({
               <button
                 className={`p-3 border rounded text-left transition-colors ${
                   theme === 'light'
-                    ? 'border-gray-300 hover:bg-blue-50 hover:border-blue-300'
-                    : 'border-[#404040] hover:bg-[#0078D4]/20 hover:border-[#0078D4]'
+                    ? 'bg-transparent border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    : 'bg-transparent border border-[#333] text-[#D4D4D4] hover:bg-white/10'
                 }`}
                 onClick={() => handleLevelSelection('beginner')}>
                 <div className={`font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Beginner</div>
@@ -297,8 +276,8 @@ const QuizTab: React.FC<QuizTabProps> = ({
               <button
                 className={`p-3 border rounded text-left transition-colors ${
                   theme === 'light'
-                    ? 'border-gray-300 hover:bg-blue-50 hover:border-blue-300'
-                    : 'border-[#404040] hover:bg-[#0078D4]/20 hover:border-[#0078D4]'
+                    ? 'bg-transparent border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    : 'bg-transparent border border-[#333] text-[#D4D4D4] hover:bg-white/10'
                 }`}
                 onClick={() => handleLevelSelection('intermediate')}>
                 <div className={`font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Intermediate</div>
@@ -309,8 +288,8 @@ const QuizTab: React.FC<QuizTabProps> = ({
               <button
                 className={`p-3 border rounded text-left transition-colors ${
                   theme === 'light'
-                    ? 'border-gray-300 hover:bg-blue-50 hover:border-blue-300'
-                    : 'border-[#404040] hover:bg-[#0078D4]/20 hover:border-[#0078D4]'
+                    ? 'bg-transparent border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    : 'bg-transparent border border-[#333] text-[#D4D4D4] hover:bg-white/10'
                 }`}
                 onClick={() => handleLevelSelection('expert')}>
                 <div className={`font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Expert</div>
@@ -342,7 +321,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
             onClick={() => handleGenerateQuizClick()}>
             Generate Quiz
           </button>
-          <button
+          {/* <button
             className={`py-2 px-4 rounded transition-colors ${
               theme === 'light'
                 ? 'bg-transparent border border-gray-300 text-gray-700 hover:bg-gray-50'
@@ -350,7 +329,7 @@ const QuizTab: React.FC<QuizTabProps> = ({
             }`}
             onClick={() => setShowCustomPrompt(prev => !prev)}>
             Custom Quiz
-          </button>
+          </button> */}
         </div>
         {showCustomPrompt && (
           <div className="flex gap-2">
