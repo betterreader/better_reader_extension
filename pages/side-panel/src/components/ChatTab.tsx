@@ -35,6 +35,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [useEnhancedChat, setUseEnhancedChat] = useState<boolean>(false);
   const [useTeacherMode, setUseTeacherMode] = useState<boolean>(false);
+  const [goDeeper, setGoDeeper] = useState<boolean>(false);
 
   // Always scroll to the bottom on new messages.
   useEffect(() => {
@@ -47,11 +48,11 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   const displayedMessages = useTeacherMode ? teacherMessages : messages;
 
   // --- Helper: Update state based on current mode ---
-  const updateMessageState = (newMessages: Message[], isTeacher: boolean) => {
+  const updateMessageState = (updateFn: (prev: Message[]) => Message[], isTeacher: boolean) => {
     if (isTeacher) {
-      setTeacherMessages(newMessages);
+      setTeacherMessages(updateFn);
     } else {
-      setMessages(newMessages);
+      setMessages(updateFn);
     }
   };
 
@@ -270,7 +271,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
           conversationHistory: teacherMessages
             .filter(msg => !msg.isTyping)
             .map(msg => ({
-              role: msg.sender === 'user' ? 'user' : 'assistant',
+              role: msg.sender === 'user' ? ('user' as const) : ('assistant' as const),
               content: msg.text,
             })),
         }),
@@ -347,25 +348,57 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
   // --- Enhanced Chat (non-teacher) ---
   const sendEnhancedChatMessage = async (text: string) => {
     try {
+      // Check if article data is available
+      if (!articleData || !articleData.content) {
+        console.error('Enhanced chat called with no article data:', articleData);
+        setMessages((prev: Message[]) => {
+          const newMessages = [...prev];
+          newMessages.pop();
+          newMessages.push({
+            sender: 'bot',
+            text: "Sorry, I couldn't extract any content from this page. Please try refreshing the page or switching to regular chat mode.",
+          });
+          return newMessages;
+        });
+        return;
+      }
+
+      // Log article data before making the API call
+      console.log('Enhanced chat sending article data:', {
+        contentLength: articleData.content.length,
+        contentSample: articleData.content.substring(0, 100) + '...',
+        title: articleData.title,
+        url: articleData.url,
+        goDeeper: goDeeper,
+      });
+
       const conversationHistory = messages
         .filter(msg => !msg.isTyping)
         .map(msg => ({
-          role: msg.sender === 'user' ? 'user' : 'assistant',
+          role: msg.sender === 'user' ? ('user' as const) : ('assistant' as const),
           content: msg.text,
         }));
+
+      console.log('Enhanced chat with article data:', {
+        url: articleData.url,
+        contentLength: articleData.content ? articleData.content.length : 0,
+        goDeeper: goDeeper,
+      });
+
       const response = await enhancedChat(
         text,
         conversationId,
         conversationHistory,
-        articleData?.url,
-        articleData?.content,
-        false, // not teacher mode
+        articleData.url,
+        articleData.content,
+        articleData.title,
+        goDeeper,
       );
       if (response.conversation_id) {
         setConversationId(response.conversation_id);
       }
       setSuggestions(response.suggestions && response.suggestions.length > 0 ? response.suggestions : []);
-      setMessages(prev => {
+      setMessages((prev: Message[]) => {
         const newMessages = [...prev];
         newMessages.pop();
         if (response.response) {
@@ -377,7 +410,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
       });
     } catch (error) {
       console.error('Error in enhanced chat:', error);
-      setMessages(prev => {
+      setMessages((prev: Message[]) => {
         const newMessages = [...prev];
         newMessages.pop();
         newMessages.push({
@@ -418,6 +451,18 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
 
   // --- Toggle between enhanced and regular (non-teacher) modes ---
   const toggleChatMode = () => {
+    // If trying to enable enhanced mode, check if article data is available
+    if (!useEnhancedChat && (!articleData || !articleData.content)) {
+      setMessages(prev => [
+        ...prev,
+        {
+          sender: 'bot',
+          text: "Sorry, enhanced chat requires article content. Please make sure you're viewing an article or try refreshing the page.",
+        },
+      ]);
+      return;
+    }
+
     setUseEnhancedChat(!useEnhancedChat);
     setMessages(prev => [
       ...prev,
@@ -506,6 +551,18 @@ const ChatTab: React.FC<ChatTabProps> = ({ articleData, apiBaseUrl, theme }) => 
               onClick={toggleChatMode}>
               {useEnhancedChat ? 'Enhanced Mode (All Articles)' : 'Regular Mode (Current Article)'}
             </button>
+            {useEnhancedChat && (
+              <button
+                onClick={() => setGoDeeper(!goDeeper)}
+                className={`px-2 py-1 text-xs rounded-md ${
+                  goDeeper
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                }`}
+                title="When enabled, includes all articles in the context instead of just the most relevant ones">
+                {goDeeper ? 'Neural Retreival: ON' : 'Neural Retreival: OFF'}
+              </button>
+            )}
             <button
               className={`text-xs px-2 py-1 rounded ${
                 // Teacher mode toggle button (always blue when off, green when on)

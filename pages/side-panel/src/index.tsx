@@ -27,45 +27,17 @@ function App() {
       console.error('Error getting session:', error);
     }
   }
-
   async function loginWithGoogle(): Promise<void> {
-    try {
-      // For testing purposes, use email/password login instead of Google OAuth
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: 'test@example.com',
-        password: 'password123',
-      });
+    const redirectURL = chrome.identity.getRedirectURL();
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectURL,
+      },
+    });
+    if (error) throw error;
 
-      if (error) {
-        console.error('Login error:', error);
-
-        // If the user doesn't exist, create a test account
-        if (error.message.includes('Invalid login credentials')) {
-          console.log('Creating test user account...');
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: 'test@example.com',
-            password: 'password123',
-          });
-
-          if (signUpError) {
-            console.error('Sign up error:', signUpError);
-            throw signUpError;
-          }
-
-          console.log('Test user created successfully');
-          setUser(signUpData.user);
-          return;
-        }
-
-        throw error;
-      }
-
-      setUser(data.user);
-      console.log('Logged in successfully with test account');
-    } catch (error) {
-      console.error('Authentication error:', error);
-      alert('Authentication failed. See console for details.');
-    }
+    await chrome.tabs.create({ url: data.url });
   }
 
   useEffect(() => {

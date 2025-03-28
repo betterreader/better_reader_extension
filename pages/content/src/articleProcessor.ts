@@ -86,7 +86,7 @@ function shouldProcessPage(): boolean {
 }
 
 /**
- * Processes the current article by extracting content and sending it to the server for embedding
+ * Processes the current article by extracting content and sending it to the server for processing
  */
 export async function processCurrentArticle(): Promise<void> {
   console.log('Better Reader: Starting article processing');
@@ -107,7 +107,7 @@ export async function processCurrentArticle(): Promise<void> {
       return;
     }
 
-    console.log('Extracting article content for vector processing:', {
+    console.log('Extracting article content for processing:', {
       title: article.title,
       url: article.url,
       contentLength: article.content.length,
@@ -117,8 +117,10 @@ export async function processCurrentArticle(): Promise<void> {
     const response = await processArticle(article.url, article.title, article.content);
 
     if (response.success) {
-      console.log('Article successfully processed for vector search', {
-        segments: response.segments_count,
+      console.log('Article successfully processed', {
+        article_id: response.article_id,
+        topics: response.topics,
+        summary: response.summary ? response.summary.substring(0, 50) + '...' : 'No summary',
       });
 
       // Notify the background script that article has been processed
@@ -127,7 +129,7 @@ export async function processCurrentArticle(): Promise<void> {
         data: {
           url: article.url,
           title: article.title,
-          segments: response.segments_count,
+          article_id: response.article_id,
         },
       });
     } else {

@@ -21,7 +21,7 @@ export async function processArticle(url: string, title: string, content: string
     console.log(`Processing article: "${title}" (${url.substring(0, 50)}...)`);
     console.log(`Content length: ${content.length} characters`);
 
-    const response = await fetch(`${API_BASE_URL}/api/process_article`, {
+    const response = await fetch(`${API_BASE_URL}/api/process_article_v2`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -156,32 +156,58 @@ export async function getArticleRecommendations(articleId: string, limit: number
  * @param message - The user's message or question
  * @param conversationId - Optional ID to track conversation history
  * @param conversationHistory - Optional array of previous messages
- * @param currentArticleId - Optional ID of the current article
- * @param currentArticleContent - Optional content of the current article
+ * @param articleUrl - Optional URL of the current article
+ * @param articleContent - Optional content of the current article
+ * @param articleTitle - Optional title of the current article
+ * @param goDeeper - Optional flag to include full context (default: false)
  * @returns Promise with the API response
  */
 export async function enhancedChat(
   message: string,
   conversationId?: string,
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  currentArticleId?: string,
-  currentArticleContent?: string,
+  articleUrl?: string,
+  articleContent?: string,
+  articleTitle?: string,
+  goDeeper?: boolean,
 ): Promise<any> {
   try {
     console.log(`Sending enhanced chat request: "${message}"`);
+    if (!articleContent) {
+      console.log('No article content available to send to enhanced chat API');
+    } else {
+      console.log(`Article content available: ${articleContent.length} characters`);
+      console.log(`Article title: ${articleTitle || 'No title'}`);
+      console.log(`Article URL: ${articleUrl || 'No URL'}`);
+    }
 
-    const response = await fetch(`${API_BASE_URL}/api/enhanced_chat`, {
+    // Log exactly what we're sending in the request body for debugging
+    const requestBody = {
+      message,
+      conversationId,
+      conversationHistory,
+      articleUrl,
+      articleContent,
+      articleTitle: articleTitle || (articleContent ? 'Current Article' : ''),
+      go_deeper: goDeeper || false,
+    };
+
+    console.log('Enhanced chat request body:', {
+      message: requestBody.message,
+      conversationId: requestBody.conversationId,
+      historyLength: requestBody.conversationHistory ? requestBody.conversationHistory.length : 0,
+      articleUrl: requestBody.articleUrl,
+      articleContentLength: requestBody.articleContent ? requestBody.articleContent.length : 0,
+      articleTitle: requestBody.articleTitle,
+      go_deeper: requestBody.go_deeper,
+    });
+
+    const response = await fetch(`${API_BASE_URL}/api/enhanced_chat_v2`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        message,
-        conversation_id: conversationId,
-        conversation_history: conversationHistory,
-        current_article_id: currentArticleId,
-        current_article_content: currentArticleContent,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {

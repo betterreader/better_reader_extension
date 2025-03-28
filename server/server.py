@@ -3,27 +3,230 @@ from flask_cors import CORS
 import time
 from dotenv import load_dotenv
 import requests
-import json
 import os
-import re
+import json
 import uuid
-import numpy as np
-from supabase import create_client, Client
+import re
+import atexit
 from typing import List, Dict, Any, Optional, Tuple
+from collections import Counter
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from sklearn.feature_extraction.text import TfidfVectorizer
+from supabase import create_client, Client
+import openai
+import numpy as np
 import datetime
 from functools import wraps
-import openai
-from flask import Flask, request, jsonify, g
-import atexit
 import multiprocessing
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import TfidfVectorizer
-from collections import Counter
+
+# Add these functions at the top of the file, before they're called
+def generate_article_topics(content: str, title: str = "", max_topics: int = 10) -> List[str]:
+    """
+    Generate topics for an article using Gemini API.
+    
+    Args:
+        content: The article content
+        title: The article title
+        max_topics: Maximum number of topics to generate
+        
+    Returns:
+        List of topics
+    """
+    try:
+        # Truncate content if it's too long
+        max_content_length = 10000
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "..."
+        
+        # Create prompt for Gemini
+        prompt = f"""
+        Title: {title}
+        
+        Content: {content}
+        
+        Extract exactly {max_topics} topics from this article. Topics should be:
+        1. Single words or short phrases (1-3 words maximum)
+        2. Relevant to the main themes and concepts in the article
+        3. Useful for categorizing and searching for this article
+        4. Specific enough to be meaningful but general enough to connect related articles
+        
+        Return ONLY a comma-separated list of topics with no additional text, explanations, or formatting.
+        Example output format: "artificial intelligence, machine learning, neural networks, data science"
+        """
+        
+        # Prepare the API request
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "topP": 0.8,
+                "topK": 40,
+                "maxOutputTokens": 200,
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        
+        # Call Gemini API
+        response = requests.post(
+            GEMINI_API_URL,
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        
+        if response.status_code != 200:
+            print(f"Error from Gemini API: {response.text}")
+            # Fall back to keyword extraction
+            return extract_keywords(content, max_topics)
+            
+        response_data = response.json()
+        
+        # Extract the text from the response
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            if 'content' in response_data['candidates'][0]:
+                text = response_data['candidates'][0]['content']['parts'][0]['text']
+                
+                # Clean up the response - remove any explanations and get just the comma-separated list
+                topics = [topic.strip() for topic in text.split(',')]
+                
+                # Filter out any empty topics or topics that are too long
+                topics = [topic for topic in topics if topic and len(topic) <= 30]
+                
+                return topics[:max_topics]
+        
+        # Fall back to keyword extraction if Gemini fails
+        print("Falling back to keyword extraction for topics")
+        return extract_keywords(content, max_topics)
+        
+    except Exception as e:
+        print(f"Error generating article topics: {str(e)}")
+        # Fall back to keyword extraction
+        return extract_keywords(content, max_topics)
+
+def generate_article_summary(content: str, title: str = "", max_length: int = 500) -> str:
+    """
+    Generate a concise summary of an article using Gemini API.
+    
+    Args:
+        content: The article content
+        title: The article title
+        max_length: Maximum length of the summary in characters
+        
+    Returns:
+        Article summary
+    """
+    try:
+        # Truncate content if it's too long
+        max_content_length = 10000
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "..."
+        
+        # Create prompt for Gemini
+        prompt = f"""
+        Title: {title}
+        
+        Content: {content}
+        
+        Generate a concise summary of this article in about 3-5 sentences. The summary should:
+        1. Capture the main points and key information
+        2. Be factual and objective
+        3. Be written in a clear, professional style
+        4. Not exceed {max_length} characters
+        
+        Return ONLY the summary with no additional text, explanations, or formatting.
+        """
+        
+        # Prepare the API request
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "topP": 0.8,
+                "topK": 40,
+                "maxOutputTokens": 500,
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        
+        # Call Gemini API
+        response = requests.post(
+            GEMINI_API_URL,
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        
+        if response.status_code != 200:
+            print(f"Error from Gemini API: {response.text}")
+            # Fall back to extracting the first few sentences
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            return " ".join(sentences[:3])[:max_length]
+            
+        response_data = response.json()
+        
+        # Extract the text from the response
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            if 'content' in response_data['candidates'][0]:
+                summary = response_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                
+                # Truncate if too long
+                if len(summary) > max_length:
+                    summary = summary[:max_length-3] + "..."
+                    
+                return summary
+        
+        # Fall back to extracting the first few sentences
+        sentences = re.split(r'(?<=[.!?])\s+', content)
+        return " ".join(sentences[:3])[:max_length]
+        
+    except Exception as e:
+        print(f"Error generating article summary: {str(e)}")
+        # Fall back to extracting the first few sentences
+        try:
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            return " ".join(sentences[:3])[:max_length]
+        except:
+            return content[:max_length] if content else ""
 
 # Load environment variables
 load_dotenv()
+
+# Download required NLTK resources
+def download_nltk_resources():
+    """Download required NLTK resources if they're not already downloaded."""
+    try:
+        # Check if resources are already downloaded to avoid redundant messages
+        import os
+        nltk_data_path = os.path.expanduser('~/nltk_data')
+        punkt_path = os.path.join(nltk_data_path, 'tokenizers', 'punkt')
+        stopwords_path = os.path.join(nltk_data_path, 'corpora', 'stopwords')
+        
+        # Only download if resources don't exist
+        if not os.path.exists(punkt_path):
+            nltk.download('punkt', quiet=True)
+        
+        if not os.path.exists(stopwords_path):
+            nltk.download('stopwords', quiet=True)
+            
+    except Exception as e:
+        print(f"Error with NLTK resources: {str(e)}")
+
+# Download NLTK resources when server starts (silently)
+download_nltk_resources()
 
 app = Flask(__name__)
 # Enable CORS for all routes with more specific configuration
@@ -33,8 +236,10 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY')
 SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 
-# Use service role key for database operations
-supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+# Initialize Supabase client
+supabase_url = os.environ.get('SUPABASE_URL')
+supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+supabase = create_client(supabase_url, supabase_key)
 
 # Configure OpenAI API
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -43,28 +248,26 @@ openai.api_key = OPENAI_API_KEY
 # Initialize session for requests
 session = requests.Session()
 
-# Download NLTK resources
-try:
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('stopwords')
-
 # Enhanced cleanup function to prevent semaphore leaks
 def cleanup_resources():
     try:
         print("Cleaning up resources")
-        # Close the requests session
-        session.close()
+        # Clean up any joblib/loky semaphores
+        import os
+        import glob
+        import tempfile
         
-        # Clean up any multiprocessing resources (which can cause semaphore leaks)
-        # Force cleanup of any remaining multiprocessing resources
-        if hasattr(multiprocessing, 'resource_tracker'):
+        # Clean up semaphores that might be leaked by joblib/loky
+        semaphore_pattern = os.path.join(tempfile.gettempdir(), '/loky-*')
+        for semaphore in glob.glob(semaphore_pattern):
             try:
-                multiprocessing.resource_tracker._resource_tracker.clear()
-            except:
+                os.unlink(semaphore)
+            except (FileNotFoundError, PermissionError):
                 pass
+                
+        # Close any open sessions
+        if session:
+            session.close()
     except Exception as e:
         print(f"Error during cleanup: {str(e)}")
 
@@ -309,6 +512,7 @@ def segment_text(text: str, max_chunk_size: int = 1000, overlap: int = 200, max_
     # If text is shorter than max_chunk_size, return it as a single segment
     if len(text) <= max_chunk_size:
         print("Text shorter than max_chunk_size, creating single segment")
+        # Create a single segment
         segment_text = text.strip()
         keywords = extract_keywords(segment_text)
         importance = calculate_importance_score(segment_text)
@@ -624,7 +828,102 @@ def vector_search(
 @app.route('/api/process_article', methods=['POST'])
 def process_article():
     """
+    Legacy endpoint that redirects to process_article_v2.
+    This is kept for backward compatibility.
+    
+    Original implementation (commented out):
     Process an article to segment text and generate embeddings.
+    
+    Request JSON:
+    {
+        "url": "https://example.com/article",
+        "title": "Article Title",
+        "content": "Full article text...",
+        "user_id": "optional-user-id"
+    }
+    """
+    print("WARNING: /api/process_article endpoint is deprecated. Use /api/process_article_v2 instead.")
+    return process_article_v2()
+    
+    # Original implementation (commented out):
+    """
+    try:
+        data = request.json
+        
+        if not data or 'content' not in data or 'url' not in data:
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        content = data['content']
+        url = data['url']
+        title = data.get('title', 'Untitled Article')
+        user_id = data.get('user_id')
+        
+        # Generate topics for the article
+        topics = generate_article_topics(content, title)
+        print(f"Generated topics: {topics}")
+        
+        # Generate summary for the article
+        summary = generate_article_summary(content, title)
+        print(f"Generated summary: {summary}")
+        
+        # Segment the article text
+        segments = segment_text(content)
+        
+        # Generate embeddings for each segment
+        embeddings = [generate_embedding(segment['text']) for segment in segments]
+        
+        # Generate a UUID for the article
+        article_id = str(uuid.uuid4())
+        
+        # Insert article record with summary
+        article_data = {
+            'id': article_id,
+            'url': url,
+            'title': title,
+            'user_id': user_id,
+            'topics': topics,
+            'summary': summary
+        }
+        
+        supabase.table('articles').insert(article_data).execute()
+        
+        # Insert segment records
+        segment_records = []
+        for i, (segment, embedding) in enumerate(zip(segments, embeddings)):
+            segment_id = str(uuid.uuid4())
+            segment_records.append({
+                'id': segment_id,
+                'article_id': article_id,
+                'segment_text': segment['text'],
+                'embedding': embedding,
+                'segment_index': i,
+                'keywords': segment['keywords'],
+                'importance_score': segment['importance_score']
+            })
+        
+        # Insert in batches to avoid request size limits
+        batch_size = 10
+        for i in range(0, len(segment_records), batch_size):
+            batch = segment_records[i:i+batch_size]
+            supabase.table('article_segments').insert(batch).execute()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Article processed successfully',
+            'segments_count': len(segments),
+            'topics': topics,
+            'summary': summary
+        })
+            
+    except Exception as e:
+        print(f"Error processing article: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    """
+
+@app.route('/api/process_article_v2', methods=['POST'])
+def process_article_v2():
+    """
+    Process an article to generate topics and summary without segmentation or embeddings.
     
     Request JSON:
     {
@@ -645,26 +944,48 @@ def process_article():
         title = data.get('title', 'Untitled Article')
         user_id = data.get('user_id')
         
-        # Segment the article text
-        segments = segment_text(content)
+        # Generate topics for the article
+        topics = generate_article_topics(content, title)
+        print(f"Generated topics: {topics}")
         
-        # Generate embeddings for each segment
-        embeddings = [generate_embedding(segment['text']) for segment in segments]
+        # Generate summary for the article
+        summary = generate_article_summary(content, title)
+        print(f"Generated summary: {summary}")
         
-        # Store segments and embeddings
-        success = store_article_embeddings(url, title, segments, embeddings, user_id)
+        # Generate a UUID for the article
+        article_id = str(uuid.uuid4())
         
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'Article processed successfully',
-                'segments_count': len(segments)
-            })
-        else:
-            return jsonify({'error': 'Failed to store article data'}), 500
+        # Insert article record with summary and topics
+        article_data = {
+            'id': article_id,
+            'url': url,
+            'title': title,
+            'user_id': user_id,
+            'topics': topics,
+            'summary': summary,
+            'created_at': datetime.datetime.now().isoformat()
+        }
+        
+        print(f"Inserting article data into Supabase: {article_data}")
+        try:
+            response = supabase.table('articles').insert(article_data).execute()
+            print(f"Supabase insert response: {response}")
+        except Exception as db_error:
+            print(f"Error inserting into Supabase: {str(db_error)}")
+            # Continue execution even if database insert fails
+        
+        return jsonify({
+            'success': True,
+            'message': 'Article processed successfully',
+            'article_id': article_id,
+            'topics': topics,
+            'summary': summary
+        })
             
     except Exception as e:
         print(f"Error processing article: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/vector_search', methods=['POST'])
@@ -750,18 +1071,25 @@ def vector_search_qa():
             "Content-Type": "application/json"
         }
         
-        data = {
-            "contents": [{
-                "parts": [{
-                    "text": gemini_prompt
-                }]
-            }]
-        }
-        
+        # Call Gemini API
         response = session.post(
             GEMINI_API_URL,
             headers=headers,
-            json=data
+            json={
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": gemini_prompt}
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "topK": 40,
+                    "topP": 0.95,
+                    "maxOutputTokens": 1024
+                }
+            }
         )
         
         response_json = response.json()
@@ -896,11 +1224,12 @@ def generate_tags():
         # Extract tags from response
         try:
             tags_text = response.choices[0].message.content.strip()
-            # Handle if response is wrapped in code blocks
+            # Handle if response is wrapped in markdown code blocks
             if "```json" in tags_text:
                 tags_text = tags_text.split("```json")[1].split("```")[0]
             elif "```" in tags_text:
                 tags_text = tags_text.split("```")[1].split("```")[0]
+            
             tags = json.loads(tags_text)
             return jsonify({'tags': tags})
         except Exception as e:
@@ -930,7 +1259,6 @@ def chat():
     
     message = data['message']
     article_content = data['articleContent']
-    
     article_title = data.get('articleTitle', '')
     article_url = data.get('articleUrl', '')
     quiz_context = data.get('quizContext', '')
@@ -963,9 +1291,7 @@ def chat():
         "contents": [
             {
                 "parts": [
-                    {
-                        "text": evaluation_prompt
-                    }
+                    {"text": evaluation_prompt}
                 ]
             }
         ],
@@ -1047,9 +1373,7 @@ def chat():
                 "contents": [
                     {
                         "parts": [
-                            {
-                                "text": base_prompt
-                            }
+                            {"text": base_prompt}
                         ]
                     }
                 ],
@@ -1136,9 +1460,7 @@ def analyze():
         "contents": [
             {
                 "parts": [
-                    {
-                        "text": caption_prompt
-                    }
+                    {"text": caption_prompt}
                 ]
             }
         ],
@@ -1216,9 +1538,11 @@ def handle_explanation_request():
         2. DO NOT repeat or quote the original selected text verbatim in your explanation.
         3. Provide a fresh explanation in your own words that helps the user understand the concept.
         4. Focus only on explaining the concept, not repeating what was already said.
-        5. Keep your explanation concise and to the point.
+        5. Keep your explanation concise and focused on answering the user's question.
+        6. When referring to articles, clearly indicate which one is the CURRENT article versus previous reading
+        7. Pay attention to the relevance details provided with each source to understand why it was selected
         """
-
+        
         # Add article content if available (limited to avoid token limits)
         article_content = data.get('articleContent', '')
         if article_content:
@@ -1234,15 +1558,11 @@ def handle_explanation_request():
         while retries <= max_retries:
             try:
                 response = session.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, data=json.dumps({
-                    "contents": [
-                        {
-                            "parts": [
-                                {
-                                    "text": base_prompt
-                                }
-                            ]
-                        }
-                    ],
+                    "contents": [{
+                        "parts": [{
+                            "text": base_prompt
+                        }]
+                    }],
                     "generationConfig": {
                         "temperature": 0.2,
                         "topP": 0.8,
@@ -1278,7 +1598,7 @@ def handle_explanation_request():
                 print(f"Error generating explanation: {e}")
                 retries += 1
                 if retries > max_retries:
-                    return jsonify({'error': 'Failed to generate explanation after multiple attempts'}), 500
+                    return jsonify({'error': 'Failed to generate a valid explanation'}), 500
         
         if not response_text or retries > max_retries:
             return jsonify({'error': 'Failed to generate a valid explanation'}), 500
@@ -1399,21 +1719,21 @@ def research():
         try:
             # Handle potential markdown code blocks
             if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
+                content = content.split("```json")[1].split("```")[0]
             elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
+                content = content.split("```")[1].split("```")[0]
             
             # Parse the JSON string into a Python dictionary
             results = json.loads(content)
             
             # Validate results structure
-            if not isinstance(results, dict) or 'results' not in results:
-                print("Invalid results structure")
-                return jsonify({'error': 'Invalid results format'}), 500
-                
-            print("Successfully parsed research results")
-            return jsonify(results)
-            
+            if isinstance(results, dict) and 'results' in results:
+                valid_results = []
+                for item in results['results'][:5]:  # Limit to 5 items
+                    if isinstance(item, dict) and 'title' in item and 'url' in item and 'snippet' in item:
+                        valid_results.append(item)
+                return jsonify({'results': valid_results})
+            return []
         except json.JSONDecodeError as e:
             print(f"JSON parsing error: {str(e)}")
             print(f"Failed content: {content}")
@@ -1461,7 +1781,7 @@ def generate_summary():
         Article Content:
         {article_content[:4000]}
         
-        Format your response as a JSON object with these possible fields:
+        Format your response as a JSON object with the following possible fields:
         {{
             "bulletPoints": ["point1", "point2", ...],
             "definitions": [{{"term": "term1", "definition": "definition1"}}, ...],
@@ -1553,12 +1873,21 @@ def enhanced_chat():
     
     message = data['message']
     
+    # Log the entire incoming data for debugging
+    print("Enhanced chat request data:", data)
+    
+    # Use get() method to safely access optional parameters
     article_content = data.get('articleContent', '')
     article_title = data.get('articleTitle', '')
     article_url = data.get('articleUrl', '')
     quiz_context = data.get('quizContext', '')
-    conversation_id = data.get('conversation_id')
-    conversation_history = data.get('conversation_history', [])
+    conversation_id = data.get('conversationId') or data.get('conversation_id')
+    conversation_history = data.get('conversationHistory') or data.get('conversation_history', [])
+    
+    if article_content:
+        print(f"Article content received: {len(article_content)} characters")
+    else:
+        print("No article content received")
     
     print(f"Enhanced chat request: '{message}'")
     print(f"Conversation ID: {conversation_id}")
@@ -1595,11 +1924,13 @@ def enhanced_chat():
             "summarize this article",
             "summarize this"
         ]:
-            is_about_current_article = True and article_content
+            is_about_current_article = bool(article_content)
             print("User is asking about the current article")
+            if not article_content:
+                print("WARNING: User is asking about current article but no article content was provided")
         else:
             # Check if the query contains keywords from the article
-            query_keywords = extract_keywords(message)
+            query_keywords = extract_keywords_from_query(message)
             keyword_overlap = set(query_keywords).intersection(set(current_article_keywords))
             if len(keyword_overlap) >= 2 or (len(query_keywords) > 0 and len(keyword_overlap) / len(query_keywords) > 0.5):
                 is_about_current_article = True
@@ -1648,7 +1979,16 @@ def enhanced_chat():
         current_article_context = ""
         current_article_results = []
         
-        if article_url and (is_about_current_article or len(search_results) < 2):
+        if is_about_current_article and article_content:
+            # When directly asking about current article, use the article content directly
+            print("Using current article content directly for summary")
+            # Create a simple context from the article content
+            max_context_length = 8000  # Limit context to avoid token limits
+            if len(article_content) > max_context_length:
+                current_article_context += f"# Current Article: {article_title}\n\n{article_content[:max_context_length]}..."
+            else:
+                current_article_context += f"# Current Article: {article_title}\n\n{article_content}"
+        elif article_url and (is_about_current_article or len(search_results) < 2):
             # Get specific context from the current article
             current_article_results = vector_search(
                 message, 
@@ -1661,7 +2001,7 @@ def enhanced_chat():
             # Add this context to our results
             if current_article_results:
                 current_article_context = "\n\n".join([
-                    f"From current article '{article_title}': {result['segment_text']}\n[{result['relevance_details']}]" 
+                    f"From '{result['segment_text'][:100]}...' ({result['article_id']}):\n{result['segment_text']}\n[{result.get('relevance_details', '')}]" 
                     for result in current_article_results
                 ])
         
@@ -1673,123 +2013,71 @@ def enhanced_chat():
         # If asking specifically about current article, only use current article results
         results_to_process = current_article_results if is_about_current_article else search_results
         
-        for result in results_to_process:
-            # Skip results below dynamic threshold (unless asking about current article)
-            if not is_about_current_article and 'combined_score' in result and result['combined_score'] < dynamic_threshold:
-                print(f"Skipping result with low combined score: {result['combined_score']:.4f} (below threshold {dynamic_threshold:.4f})")
-                continue
+        # for result in results_to_process:
+        #     # Skip results below dynamic threshold (unless asking about current article)
+        #     if not is_about_current_article and 'combined_score' in result and result['combined_score'] < dynamic_threshold:
+        #         print(f"Skipping result with low combined score: {result['combined_score']:.4f} (below threshold {dynamic_threshold:.4f})")
+        #         continue
                 
-            article_id = result['article_id']
+        #     article_id = result['article_id']
             
-            # Get article metadata
-            article_data = supabase.table('articles').select('title, url, created_at, topics').filter('id', 'eq', article_id).execute()
-            article_title = "Unknown Article"
-            article_url = "#"
-            created_at = None
-            article_topics = []
+        #     # Get article metadata
+        #     article_data = supabase.table('articles').select('title, url, created_at, topics').filter('id', 'eq', article_id).execute()
             
-            if article_data.data and len(article_data.data) > 0:
-                article_title = article_data.data[0]['title']
-                article_url = article_data.data[0]['url']
-                created_at = article_data.data[0].get('created_at')
-                article_topics = article_data.data[0].get('topics', [])
+        #     article_title = "Unknown Article"
+        #     article_url = "#"
+        #     created_at = None
+        #     article_topics = []
             
-            # Create a simple hash of the content to detect duplicates/very similar content
-            content_hash = hash(result['segment_text'][:100].lower().strip())
+        #     if article_data.data and len(article_data.data) > 0:
+        #         article_title = article_data.data[0]['title']
+        #         article_url = article_data.data[0]['url']
+        #         created_at = article_data.data[0].get('created_at')
+        #         article_topics = article_data.data[0].get('topics', [])
             
-            # Skip if we've seen very similar content already
-            if content_hash in seen_content_hashes:
-                print(f"Skipping duplicate content from article: {article_title}")
-                continue
+        #     # Create a simple hash of the content to detect duplicates/very similar content
+        #     content_hash = hash(result['segment_text'][:100].lower().strip())
+            
+        #     # Skip if we've seen very similar content already
+        #     if content_hash in seen_content_hashes:
+        #         print(f"Skipping duplicate content from article: {article_title}")
+        #         continue
                 
-            seen_content_hashes.add(content_hash)
-            seen_article_ids.add(article_id)
+        #     seen_content_hashes.add(content_hash)
+        #     seen_article_ids.add(article_id)
             
-            # Check if this is from the current article
-            is_from_current_article = article_url == article_url
+        #     # Check if this is from the current article
+        #     is_from_current_article = article_url == article_url
             
-            # Add relevance details for transparency
-            relevance_details = f"Relevance: {result['combined_score']:.2f}"
-            if 'topic_overlap' in result and result['topic_overlap'] > 0:
-                relevance_details += f", Topic match: {result['topic_overlap']:.2f}"
-            if 'keyword_match' in result and result['keyword_match'] > 0:
-                relevance_details += f", Keyword match: {result['keyword_match']:.2f}"
-            if 'importance_score' in result and result['importance_score'] != 1.0:
-                relevance_details += f", Importance: {result['importance_score']:.2f}"
+        #     # Add relevance details for transparency
+        #     relevance_details = f"Relevance: {result['combined_score']:.2f}"
+        #     if 'topic_overlap' in result and result['topic_overlap'] > 0:
+        #         relevance_details += f", Topic match: {result['topic_overlap']:.2f}"
+        #     if 'keyword_match' in result and result['keyword_match'] > 0:
+        #         relevance_details += f", Keyword match: {result['keyword_match']:.2f}"
+        #     if 'importance_score' in result and result['importance_score'] != 1.0:
+        #         relevance_details += f", Importance: {result['importance_score']:.2f}"
             
-            context_chunks.append({
-                'text': result['segment_text'],
-                'source': article_title,
-                'url': article_url,
-                'similarity': result.get('similarity', 0),
-                'combined_score': result.get('combined_score', 0),
-                'created_at': created_at,
-                'is_current_article': is_from_current_article,
-                'topics': article_topics,
-                'keywords': result.get('keywords', []),
-                'relevance_details': relevance_details
-            })
+        #     context_chunks.append({
+        #         'text': result['segment_text'],
+        #         'source': article_title,
+        #         'url': article_url,
+        #         'similarity': result.get('similarity', 0),
+        #         'combined_score': result.get('combined_score', 0),
+        #         'created_at': created_at,
+        #         'is_current_article': is_from_current_article,
+        #         'topics': article_topics,
+        #         'keywords': result.get('keywords', []),
+        #         'relevance_details': relevance_details
+        #     })
         
-        # Add current article results if not already processed
-        if not is_about_current_article:
-            for result in current_article_results:
-                article_id = result['article_id']
-                
-                # Skip if we've already included this article
-                if article_id in seen_article_ids:
-                    continue
-                    
-                # Get article metadata
-                article_data = supabase.table('articles').select('title, url, created_at, topics').filter('id', 'eq', article_id).execute()
-                article_title = "Unknown Article"
-                article_url = "#"
-                created_at = None
-                article_topics = []
-                
-                if article_data.data and len(article_data.data) > 0:
-                    article_title = article_data.data[0]['title']
-                    article_url = article_data.data[0]['url']
-                    created_at = article_data.data[0].get('created_at')
-                    article_topics = article_data.data[0].get('topics', [])
-                
-                # Create a simple hash of the content to detect duplicates
-                content_hash = hash(result['segment_text'][:100].lower().strip())
-                
-                # Skip if we've seen very similar content already
-                if content_hash in seen_content_hashes:
-                    continue
-                    
-                seen_content_hashes.add(content_hash)
-                seen_article_ids.add(article_id)
-                
-                # Check if this is from the current article
-                is_from_current_article = article_url == article_url
-                
-                # Add relevance details
-                relevance_details = f"Relevance: {result.get('combined_score', result.get('similarity', 0)):.2f}"
-                if 'importance_score' in result and result['importance_score'] != 1.0:
-                    relevance_details += f", Importance: {result['importance_score']:.2f}"
-                
-                context_chunks.append({
-                    'text': result['segment_text'],
-                    'source': article_title,
-                    'url': article_url,
-                    'similarity': result.get('similarity', 0),
-                    'combined_score': result.get('combined_score', result.get('similarity', 0) * 1.5),  # Boost current article
-                    'created_at': created_at,
-                    'is_current_article': is_from_current_article,
-                    'topics': article_topics,
-                    'keywords': result.get('keywords', []),
-                    'relevance_details': relevance_details
-                })
+        # # Sort context chunks by combined score
+        # context_chunks.sort(key=lambda x: x['combined_score'], reverse=True)
         
-        # Sort context chunks by combined score
-        context_chunks.sort(key=lambda x: x['combined_score'], reverse=True)
+        # # Take top 5 most relevant chunks
+        # context_chunks = context_chunks[:5]
         
-        # Take top 5 most relevant chunks
-        context_chunks = context_chunks[:5]
-        
-        print(f"Selected {len(context_chunks)} context chunks after filtering and ranking")
+        # print(f"Selected {len(context_chunks)} context chunks after filtering and ranking")
         
         # Format context for the prompt
         current_article_chunks = [chunk for chunk in context_chunks if chunk.get('is_current_article', False)]
@@ -1852,6 +2140,8 @@ def enhanced_chat():
             prompt += f"""
             The user is asking about their CURRENT article '{article_title}'. 
             Focus EXCLUSIVELY on explaining what this specific article is about based on the provided context.
+            Provide a clear, concise summary of the main points and key information from the article.
+            Include the main topic, key arguments, important facts, and conclusions if available.
             If you don't have enough information about the current article, acknowledge this and ask for more details.
             """
         else:
@@ -1957,9 +2247,9 @@ def enhanced_chat():
             seen_sources = {}  # Use dict to preserve original order
             
             for chunk in context_chunks:
-                source_key = (chunk["source"], chunk["url"])
-                if source_key not in seen_sources:
-                    seen_sources[source_key] = {
+                src = (chunk["source"], chunk["url"])
+                if src not in seen_sources:
+                    seen_sources[src] = {
                         "title": chunk["source"], 
                         "url": chunk["url"]
                     }
@@ -1983,7 +2273,7 @@ def enhanced_chat():
     except Exception as e:
         print(f"Exception in enhanced chat: {str(e)}")
         import traceback
-        print(traceback.format_exc())
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate-quiz', methods=['POST'])
@@ -2211,7 +2501,7 @@ def generate_quiz():
                     quiz_data = json.loads(json_str)
                     print("Successfully parsed JSON response")
                     return jsonify(quiz_data)
-                except json.JSONDecodeError as e:
+                except Exception as e:
                     print(f"JSON parsing error: {str(e)}")
                     # If JSON parsing fails, return an error
                     return jsonify({
@@ -2325,6 +2615,973 @@ Respond with just your next message in the conversation."""
             
     except Exception as e:
         print(f"Exception in teacher chat: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/enhanced_chat_v2', methods=['POST'])
+def enhanced_chat_v2():
+    """
+    Enhanced chat endpoint that supports natural, conversational responses.
+    It leverages conversation history and uses a pre-summarized article database.
+    Unless the "go_deeper" flag is set, Gemini is asked to filter and select the
+    most relevant summaries based on the user's query and current article context.
+    The prompt instructs Gemini to only incorporate the provided context if it
+    helps answer the user's question.
+    
+    Expected Request JSON:
+    {
+      "message": "User's question or message",
+      "conversation_id": "optional-conversation-id",
+      "conversation_history": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}],
+      "articleUrl": "optional-current-article-url",
+      "articleContent": "optional-current-article-content",
+      "articleTitle": "optional-current-article-title",
+      "go_deeper": "optional boolean flag to include full context"
+    }
+    """
+    try:
+        import uuid
+        print("Received enhanced chat v2 request")
+        data = request.json or {}
+
+        if 'message' not in data:
+            return jsonify({'error': 'Message is required'}), 400
+
+        # Extract request parameters
+        message = data['message']
+        article_content = data.get('articleContent', '')
+        article_title = data.get('articleTitle', '')
+        article_url = data.get('articleUrl', '')
+        conversation_id = data.get('conversation_id', str(uuid.uuid4()))
+        conversation_history = data.get('conversation_history', [])
+        go_deeper = data.get('go_deeper', False)
+
+        print(f"User message: '{message}'")
+        print(f"Conversation ID: {conversation_id}")
+        print(f"Go deeper flag: {go_deeper}")
+        print(f"Current article title: '{article_title}'")
+
+        # First, determine if the question can be answered from the article
+        evaluation_prompt = f"""
+        Article Title: {article_title}
+        
+        Article Content: 
+        {article_content}  
+        
+        User Question: {message}
+        
+        Task: Determine if the user's question can be directly answered using information from the article.
+        
+        Instructions:
+        1. Analyze the user's question and the article content.
+        2. Determine if the article contains the necessary information to provide a complete and accurate answer.
+        3. Respond with either "ANSWERABLE_FROM_ARTICLE" or "REQUIRES_GENERAL_KNOWLEDGE" followed by a brief explanation.
+        
+        Example responses:
+        "ANSWERABLE_FROM_ARTICLE: The article directly discusses this topic in paragraph 3."
+        "REQUIRES_GENERAL_KNOWLEDGE: The article doesn't cover this specific information about [topic]."
+        """
+
+        # Prepare request to Gemini API for evaluation
+        evaluation_payload = {
+            "contents": [{"parts": [{"text": evaluation_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 256
+            }
+        }
+
+        headers = {"Content-Type": "application/json"}
+        
+        print("Sending request to Gemini API for evaluation")
+        evaluation_response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(evaluation_payload))
+        evaluation_data = evaluation_response.json()
+
+        # if 'candidates' in evaluation_data and len(evaluation_data['candidates']) > 0:
+        #     evaluation_result = evaluation_data['candidates'][0]['content']['parts'][0]['text'].strip()
+        #     print(f"Evaluation result: {evaluation_result}")
+            
+        #     # If the question can be answered from the article, use the article content directly
+        #     if "ANSWERABLE_FROM_ARTICLE" in evaluation_result:
+        #         print("Question can be answered from article content")
+                
+        #         # Generate a direct answer using the article content
+        #         answer_prompt = f"""
+        #         Article Title: {article_title}
+                
+        #         Article Content: 
+        #         {article_content}
+                
+        #         User Question: {message}
+                
+        #         Task: Provide a concise and accurate answer to the user's question using information from the article.
+                
+        #         Instructions:
+        #         1. Base your answer solely on the information provided in the article.
+        #         2. Be specific and use quotes from the article when appropriate.
+        #         3. Keep your response focused and relevant to the question.
+        #         4. If the article doesn't contain the answer, say so clearly.
+        #         """
+                
+        #         answer_payload = {
+        #             "contents": [{"parts": [{"text": answer_prompt}]}],
+        #             "generationConfig": {
+        #                 "temperature": 0.3,
+        #                 "topK": 40,
+        #                 "topP": 0.95,
+        #                 "maxOutputTokens": 1024
+        #             }
+        #         }
+                
+        #         print("Generating direct answer from article content")
+        #         answer_response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(answer_payload))
+        #         answer_data = answer_response.json()
+                
+        #         if 'candidates' in answer_data and len(answer_data['candidates']) > 0:
+        #             answer_text = answer_data['candidates'][0]['content']['parts'][0]['text']
+        #             return jsonify({
+        #                 'response': answer_text,
+        #                 'conversation_id': conversation_id,
+        #                 'sources': [{'title': article_title, 'url': article_url}],
+        #                 'suggestions': []
+        #             })
+                    
+        # Load pre-summarized article database
+        article_db = get_pre_summarized_articles()
+        print(f"Retrieved {len(article_db)} pre-summarized articles")
+        relevant_or_full_db_context = ""
+        # Build the context string
+        if go_deeper:
+            # Include the full database as context
+            relevant_or_full_db_context = "\n\n".join([
+                f"Title: {art['title']}\nSummary: {art['summary']}\nURL: {art['url']}"
+                for art in article_db
+            ])
+            print("Using full database context due to go_deeper flag")
+            relevant_summaries = article_db  # For source tracking
+        else:
+            # Use Gemini to select the most relevant summaries
+            # Optionally, pass the current article content (if available) as extra context
+            current_context = article_content if article_content else ""
+            relevant_summaries = select_relevant_summaries_with_gemini(article_db, message, current_context)
+            relevant_or_full_db_context = "\n\n".join([
+                f"Title: {art['title']}\nSummary: {art['summary']}\nURL: {art['url']}"
+                for art in relevant_summaries
+            ])
+            print(f"Using Gemini-filtered context with {len(relevant_summaries)} relevant summaries")
+        
+        formatted_history = "\n".join([
+        f"{msg['role'].capitalize()}: {msg['content']}"
+        for msg in conversation_history[-5:]
+        ])
+        style_instructions = """
+        STYLE INSTRUCTIONS:
+        1. Respond in a direct, concise, and natural tone.
+        2. Do NOT use phrases like "I need more information" or "That's a great question."
+        3. Do NOT ask the user to provide more details unless the user explicitly asks for it.
+        4. When referring to past articles, do so succinctly and in a straightforward manner.
+        5. Focus on whether the user has read similar articles, listing them clearly if relevant.
+        """
+
+        prompt = f"""
+        User: {message}
+        {style_instructions}
+        Article Title: {article_title}
+        
+        Article Content: 
+        {article_content}  
+        {"Here is some context from related articles:\n" + relevant_or_full_db_context if relevant_or_full_db_context else ""}
+        {"Previous conversation:\n" + formatted_history if formatted_history else ""}
+
+        You are a friendly and knowledgeable assistant. Please provide a clear, conversational answer to the user's question. 
+        Please ensure the output is well formatted.
+        """
+
+        payload = {
+        "contents": [
+            {"parts": [{"text": prompt}]}
+        ],
+        "generationConfig": {
+            "temperature": 0.7,
+            "topK": 40,
+            "topP": 0.95,
+            "maxOutputTokens": 1024
+        }
+    }
+
+
+        headers = {"Content-Type": "application/json"}
+        response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+        response_data = response.json()
+
+
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            answer_text = response_data['candidates'][0]['content']['parts'][0]['text']
+        else:
+            error_message = response_data.get('error', {}).get('message', 'Unknown error')
+            return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
+        # Step 4: Optionally, generate follow-up suggestions (not implemented here).
+        suggestions = []
+
+        # Step 5: Prepare a list of unique sources for tracking.
+        unique_sources = []
+        if go_deeper:
+            seen_sources = set()
+            for art in article_db:
+                src = (art['title'], art['url'])
+                if src not in seen_sources:
+                    seen_sources.add(src)
+                    unique_sources.append({"title": art['title'], "url": art['url']})
+        else:
+            seen_sources = set()
+            for art in relevant_summaries:
+                src = (art['title'], art['url'])
+                if src not in seen_sources:
+                    seen_sources.add(src)
+                    unique_sources.append({"title": art['title'], "url": art['url']})
+        
+        return jsonify({
+            'response': answer_text,
+            'conversation_id': conversation_id,
+            'sources': unique_sources,
+            'suggestions': suggestions
+        })
+
+        #__________________________________________________
+        # Combine all context and filter by similarity threshold
+        context_chunks = []
+        seen_article_ids = set()  # To track unique articles
+        seen_content_hashes = set()  # To detect similar content across different articles
+        
+        # If asking specifically about current article, only use current article results
+        results_to_process = relevant_summaries
+        
+        for result in results_to_process:
+            # Get article metadata
+            article_id = result['id']
+            
+            # Get article metadata
+            article_data = supabase.table('articles').select('title, url, created_at, topics').filter('id', 'eq', article_id).execute()
+            
+            article_title = "Unknown Article"
+            article_url = "#"
+            created_at = None
+            article_topics = []
+            
+            if article_data.data and len(article_data.data) > 0:
+                article_title = article_data.data[0]['title']
+                article_url = article_data.data[0]['url']
+                created_at = article_data.data[0].get('created_at')
+                article_topics = article_data.data[0].get('topics', [])
+            
+            # Create a simple hash of the content to detect duplicates/very similar content
+            content_hash = hash(result['summary'][:100].lower().strip())
+            
+            # Skip if we've seen very similar content already
+            if content_hash in seen_content_hashes:
+                print(f"Skipping duplicate content from article: {article_title}")
+                continue
+                
+            seen_content_hashes.add(content_hash)
+            seen_article_ids.add(article_id)
+            
+            # Check if this is from the current article
+            is_from_current_article = article_url == article_url
+            
+            # Add relevance details for transparency
+            relevance_details = f"Relevance: {result.get('relevance_score', 0):.2f}"
+            
+            context_chunks.append({
+                'text': result['summary'],
+                'source': article_title,
+                'url': article_url,
+                'similarity': result.get('similarity', 0),
+                'combined_score': result.get('combined_score', result.get('similarity', 0) * 1.5),  # Boost current article
+                'created_at': created_at,
+                'is_current_article': is_from_current_article,
+                'topics': article_topics,
+                'keywords': result.get('keywords', []),
+                'relevance_details': relevance_details
+            })
+        
+        # Sort context chunks by combined score
+        context_chunks.sort(key=lambda x: x['combined_score'], reverse=True)
+        
+        # Take top 5 most relevant chunks
+        context_chunks = context_chunks[:5]
+        
+        print(f"Selected {len(context_chunks)} context chunks after filtering and ranking")
+        
+        # Format context for the prompt
+        current_article_chunks = [chunk for chunk in context_chunks if chunk.get('is_current_article', False)]
+        other_article_chunks = [chunk for chunk in context_chunks if not chunk.get('is_current_article', False)]
+        
+        # First add current article context
+        formatted_context = ""
+        if current_article_chunks:
+            formatted_context += "# Content from your CURRENT article:\n"
+            formatted_context += "\n\n".join([
+                f"From '{chunk['source']}' ({chunk['url']}):\n{chunk['text']}\n[{chunk['relevance_details']}]" 
+                for chunk in current_article_chunks
+            ])
+        
+        # Then add context from other articles if available
+        if other_article_chunks:
+            if formatted_context:
+                formatted_context += "\n\n# Content from your PREVIOUS reading:\n"
+            else:
+                formatted_context += "# Content from your reading history:\n"
+                
+            formatted_context += "\n\n".join([
+                f"From '{chunk['source']}' ({chunk['url']}):\n{chunk['text']}\n[{chunk['relevance_details']}]" 
+                for chunk in other_article_chunks
+            ])
+        
+        # Step 2: Prepare conversation history for the prompt
+        formatted_history = ""
+        if conversation_history:
+            formatted_history = "\n".join([
+                f"{msg['role'].capitalize()}: {msg['content']}" 
+                for msg in conversation_history[-5:]  # Include last 5 messages
+            ])
+        
+        # Step 3: Generate insights and suggestions from reading history
+        insights = ""
+        if len(context_chunks) > 0:
+            # Find patterns or connections between articles
+            related_titles = list(set([chunk['source'] for chunk in context_chunks]))
+            if len(related_titles) > 1:
+                insights = f"You've read multiple articles that might relate to this: {', '.join(related_titles)}"
+        
+        # Step 4: Build the comprehensive prompt
+        prompt = f"""
+        # User Query
+        {message}
+        
+        # Relevant Information from Your Reading
+        {formatted_context}
+        {relevant_or_full_db_context}
+        
+        {f"# Previous Conversation\n{formatted_history}" if formatted_history else ""}
+        
+        {f"# Insights\n{insights}" if insights else ""}
+        
+        You are an assistant helping a user understand articles they've read.
+        """
+        
+        # Add special instructions based on query type
+        if message.lower().strip() in [
+            "what is this article about", 
+            "whats this article about", 
+            "what's this article about",
+            "what is this about",
+            "whats this about",
+            "what's this about",
+            "summarize this article",
+            "summarize this"
+        ]:
+            prompt += f"""
+            The user is asking about their CURRENT article '{article_title}'. 
+            Focus EXCLUSIVELY on explaining what this specific article is about based on the provided context.
+            Provide a clear, concise summary of the main points and key information from the article.
+            Include the main topic, key arguments, important facts, and conclusions if available.
+            If you don't have enough information about the current article, acknowledge this and ask for more details.
+            """
+        else:
+            prompt += """
+            Respond conversationally to their question using the provided context.
+            """
+        
+        prompt += """
+        Guidelines:
+        1. Cite sources when providing information from specific articles
+        2. If information comes from multiple sources, synthesize a coherent answer
+        3. If the context doesn't contain enough information, acknowledge this and provide a helpful response based on general knowledge
+        4. Keep your response concise and focused on answering the user's question
+        """
+        
+        # Prepare request to Gemini API
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.7,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 1024
+            }
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        print("Sending request to Gemini API for enhanced chat response")
+        response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+        response_data = response.json()
+        
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            response_text = response_data['candidates'][0]['content']['parts'][0]['text']
+            
+            # Generate suggestions for follow-up questions
+            suggestions = []
+            
+            # Generate suggestions based on context
+            if len(context_chunks) > 2:
+                suggestion_prompt = f"""
+                Based on the user's question "{message}" and the content they've read about:
+                
+                {formatted_context[:500]}
+                
+                Generate 2-3 brief follow-up questions they might want to ask next. 
+                Each question should be a single sentence. Return only the questions, one per line.
+                """
+                
+                suggestion_payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": suggestion_prompt
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.9,
+                        "maxOutputTokens": 256
+                    }
+                }
+                
+                try:
+                    suggestion_response = session.post(
+                        GEMINI_API_URL, 
+                        headers=headers, 
+                        data=json.dumps(suggestion_payload)
+                    )
+                    suggestion_data = suggestion_response.json()
+                    
+                    if 'candidates' in suggestion_data and len(suggestion_data['candidates']) > 0:
+                        suggestion_text = suggestion_data['candidates'][0]['content']['parts'][0]['text']
+                        # Extract questions from the response
+                        suggestions = [
+                            q.strip() for q in suggestion_text.split('\n') 
+                            if q.strip() and '?' in q
+                        ][:3]  # Limit to 3 suggestions
+                except Exception as e:
+                    print(f"Error generating suggestions: {str(e)}")
+            
+            # Generate a new conversation ID if one wasn't provided
+            if not conversation_id:
+                conversation_id = str(uuid.uuid4())
+            
+            # Prepare the response with sources, suggestions, and conversation tracking
+            # De-duplicate sources while preserving order
+            seen_sources = {}  # Use dict to preserve original order
+            
+            for chunk in context_chunks:
+                src = (chunk["source"], chunk["url"])
+                if src not in seen_sources:
+                    seen_sources[src] = {
+                        "title": chunk["source"], 
+                        "url": chunk["url"]
+                    }
+            
+            # Convert to list while preserving order
+            unique_sources = list(seen_sources.values())
+            
+            print(f"Returning {len(unique_sources)} unique sources after deduplication")
+            
+            return jsonify({
+                'response': response_text,
+                'conversation_id': conversation_id,
+                'sources': unique_sources,
+                'suggestions': suggestions
+            })
+        else:
+            error_message = response_data.get('error', {}).get('message', 'Unknown error')
+            print(f"Failed to generate response: {error_message}")
+            return jsonify({'error': 'Failed to generate response', 'details': error_message}), 500
+    
+    except Exception as e:
+        print(f"Error in enhanced_chat_v2: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+def build_context(article_db, user_query):
+    """
+    Build a context string from articles relevant to the user query.
+    
+    Args:
+        article_db: List of article dictionaries with metadata including topics
+        user_query: The user's query string
+        
+    Returns:
+        Formatted context string with relevant article information
+    """
+    # Extract keywords from the user query using your existing function.
+    query_keywords = set(extract_keywords_from_query(user_query))
+    
+    # Use the improved filter_articles function to get relevant articles.
+    selected_articles = filter_articles(article_db, query_keywords)
+    
+    # Optionally, limit to the top 5 articles.
+    selected_articles = selected_articles[:5]
+    
+    # Build a formatted context string from the selected articles.
+    context = "\n\n".join(
+        [f"Title: {art['title']}\nSummary: {art['summary']}\nURL: {art['url']}" 
+         for art in selected_articles]
+    )
+    return context
+
+def filter_articles(article_db, query_keywords, min_overlap=1):
+    """
+    Filter articles based on keyword overlap with query keywords.
+    
+    Args:
+        article_db: List of article dictionaries with metadata including topics
+        query_keywords: Set of keywords extracted from the user query
+        min_overlap: Minimum number of overlapping keywords required (default: 1)
+        
+    Returns:
+        List of articles sorted by relevance (number of matching keywords)
+    """
+    if not query_keywords:
+        return []
+        
+    selected_articles = []
+    
+    for article in article_db:
+        article_topics = set(article.get("topics", []))
+        matching_keywords = query_keywords.intersection(article_topics)
+        
+        if len(matching_keywords) >= min_overlap:
+            # Add article with its relevance score
+            article_with_score = article.copy()
+            article_with_score['relevance_score'] = len(matching_keywords)
+            article_with_score['matching_keywords'] = list(matching_keywords)
+            selected_articles.append(article_with_score)
+    
+    # Sort by relevance score (number of matching keywords)
+    selected_articles.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+    
+    return selected_articles
+
+def generate_article_summary(content: str, title: str = "", max_length: int = 500) -> str:
+    """
+    Generate a concise summary of an article using Gemini API.
+    
+    Args:
+        content: The article content
+        title: The article title
+        max_length: Maximum length of the summary in characters
+        
+    Returns:
+        Article summary
+    """
+    try:
+        # Truncate content if it's too long
+        max_content_length = 10000
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "..."
+        
+        # Create prompt for Gemini
+        prompt = f"""
+        Title: {title}
+        
+        Content: {content}
+        
+        Generate a concise summary of this article in about 3-5 sentences. The summary should:
+        1. Capture the main points and key information
+        2. Be factual and objective
+        3. Be written in a clear, professional style
+        4. Not exceed {max_length} characters
+        
+        Return ONLY the summary with no additional text, explanations, or formatting.
+        """
+        
+        # Prepare the API request
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                    {"text": prompt}
+                ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "topP": 0.8,
+                "topK": 40,
+                "maxOutputTokens": 500,
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        
+        # Call Gemini API
+        response = requests.post(
+            GEMINI_API_URL,
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        
+        if response.status_code != 200:
+            print(f"Error from Gemini API: {response.text}")
+            # Fall back to extracting the first few sentences
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            return " ".join(sentences[:3])[:max_length]
+            
+        response_data = response.json()
+        
+        # Extract the text from the response
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            if 'content' in response_data['candidates'][0]:
+                summary = response_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                
+                # Truncate if too long
+                if len(summary) > max_length:
+                    summary = summary[:max_length-3] + "..."
+                    
+                return summary
+        
+        # Fall back to extracting the first few sentences
+        sentences = re.split(r'(?<=[.!?])\s+', content)
+        return " ".join(sentences[:3])[:max_length]
+        
+    except Exception as e:
+        print(f"Error generating article summary: {str(e)}")
+        # Fall back to extracting the first few sentences
+        try:
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            return " ".join(sentences[:3])[:max_length]
+        except:
+            return content[:max_length] if content else ""
+
+def extract_keywords_from_query(query: str, top_n: int = 8) -> List[str]:
+    """
+    Extract keywords from a user query.
+    
+    Args:
+        query: The user query to extract keywords from
+        top_n: Maximum number of keywords to return
+        
+    Returns:
+        List of keywords extracted from the query
+    """
+    try:
+        # Simple word tokenization as fallback (no NLTK dependency)
+        words = [w.lower() for w in re.findall(r'\b\w+\b', query)]
+        
+        # Filter out common stop words
+        stop_words = set([
+            'a', 'an', 'the', 'and', 'or', 'but', 'if', 'because', 'as', 'what',
+            'which', 'this', 'that', 'these', 'those', 'then', 'just', 'so', 'than',
+            'such', 'both', 'through', 'about', 'for', 'is', 'of', 'while', 'during',
+            'to', 'from', 'in', 'on', 'at', 'by', 'me', 'you', 'he', 'she', 'it', 'we', 
+            'they', 'their', 'my', 'your', 'his', 'her', 'its', 'our', 'who', 'whom',
+            'whose', 'where', 'when', 'why', 'how', 'all', 'any', 'both', 'each',
+            'few', 'more', 'most', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+            'same', 'so', 'than', 'too', 'very', 'can', 'will', 'just', 'should',
+            'now', 'do', 'does', 'did', 'has', 'have', 'had', 'am', 'is', 'are', 'was',
+            'were', 'be', 'been', 'being', 'with', 'about', 'against', 'between',
+            'into', 'through', 'during', 'before', 'after', 'above', 'below', 'up',
+            'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once',
+            'here', 'there', 'when', 'where', 'why', 'how', 'tell', 'know', 'would',
+            'could', 'should', 'may', 'might', 'must', 'need', 'ought', 'shall'
+        ])
+        
+        keywords = [word for word in words if word not in stop_words and len(word) > 2]
+        
+        # If we have no keywords after filtering, return original words
+        if not keywords and words:
+            return words
+            
+        return keywords
+    except Exception as e:
+        print(f"Error extracting keywords from query: {str(e)}")
+        # Return simple word split as fallback
+        return query.lower().split()
+
+def generate_article_topics(content: str, title: str = "", max_topics: int = 10) -> List[str]:
+    """
+    Generate topics for an article using Gemini API.
+    
+    Args:
+        content: The article content
+        title: The article title
+        max_topics: Maximum number of topics to generate
+        
+    Returns:
+        List of topics
+    """
+    try:
+        # Truncate content if it's too long
+        max_content_length = 10000
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "..."
+        
+        # Create prompt for Gemini
+        prompt = f"""
+        Title: {title}
+        
+        Content: {content}
+        
+        Extract exactly {max_topics} topics from this article. Topics should be:
+        1. Single words or short phrases (1-3 words maximum)
+        2. Relevant to the main themes and concepts in the article
+        3. Useful for categorizing and searching for this article
+        4. Specific enough to be meaningful but general enough to connect related articles
+        
+        Return ONLY a comma-separated list of topics with no additional text, explanations, or formatting.
+        Example output format: "artificial intelligence, machine learning, neural networks, data science"
+        """
+        
+        # Prepare the API request
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                    {"text": prompt}
+                ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "topP": 0.8,
+                "topK": 40,
+                "maxOutputTokens": 200,
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        
+        # Call Gemini API
+        response = requests.post(
+            GEMINI_API_URL,
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        
+        if response.status_code != 200:
+            print(f"Error from Gemini API: {response.text}")
+            # Fall back to keyword extraction
+            return extract_keywords(content, max_topics)
+            
+        response_data = response.json()
+        
+        # Extract the text from the response
+        if 'candidates' in response_data and len(response_data['candidates']) > 0:
+            if 'content' in response_data['candidates'][0]:
+                text = response_data['candidates'][0]['content']['parts'][0]['text']
+                
+                # Clean up the response - remove any explanations and get just the comma-separated list
+                topics = [topic.strip() for topic in text.split(',')]
+                
+                # Filter out any empty topics or topics that are too long
+                topics = [topic for topic in topics if topic and len(topic) <= 30]
+                
+                return topics[:max_topics]
+        
+        # Fall back to keyword extraction if Gemini fails
+        print("Falling back to keyword extraction for topics")
+        return extract_keywords(content, max_topics)
+        
+    except Exception as e:
+        print(f"Error generating article topics: {str(e)}")
+        # Fall back to keyword extraction
+        return extract_keywords(content, max_topics)
+def select_relevant_summaries_with_gemini(article_db, query, current_article_context=""):
+    """
+    Uses Gemini to reason about which articles are most relevant to the user's query.
+    Returns a list of up to 5 articles (dicts) in order of relevance, based on Gemini's output.
+    
+    Args:
+        article_db (list): A list of dicts with keys: 'id', 'title', 'summary', 'url', 'topics', 'created_at'
+        query (str): The user's question or query
+        current_article_context (str): Optional context from the current article
+
+    Returns:
+        list: Up to 5 dicts, each containing the selected articles. If none are relevant, returns [].
+    """
+    import json
+    
+    if not article_db:
+        print("No articles in the database.")
+        return []
+
+    # Build a string that enumerates all articles with their data.
+    # For large databases, you may need to limit how many articles you include.
+    # Or chunk them if you have hundreds/thousands.
+    article_list_str = ""
+    for i, art in enumerate(article_db, start=1):
+        article_list_str += f"""
+[{i}] 
+Title: {art['title']}
+Summary: {art['summary']}
+URL: {art['url']}
+Topics: {', '.join(art.get('topics', []))}
+---
+"""
+
+    # Build a prompt that instructs Gemini to pick the top 5 articles, returning JSON only.
+    # The “IMPORTANT” instructions ask Gemini to give pure JSON (no extra text).
+    prompt = f"""
+You are an assistant. The user has the following query:
+"{query}"
+
+They also have some current article context:
+"{current_article_context}"
+
+We have a list of articles (with Title, Summary, URL, and Topics) below:
+{article_list_str}
+
+IMPORTANT:
+1. Return exactly 5 or fewer articles that are most relevant to the query (in descending order of relevance).
+2. Format your response as valid JSON only. Example:
+
+[
+  {{
+    "title": "...",
+    "summary": "...",
+    "url": "...",
+    "topics": ["topic1", "topic2"]
+  }},
+  ...
+]
+
+3. If no articles are relevant, return an empty JSON array: []
+4. Do not include any extra text or explanation besides the JSON array.
+"""
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1024
+        }
+    }
+
+    headers = {"Content-Type": "application/json"}
+    
+    # Replace GEMINI_API_URL with your actual Gemini endpoint.
+    response = session.post(GEMINI_API_URL, headers=headers, data=json.dumps(payload))
+    response_data = response.json()
+
+    # Attempt to parse the JSON output from Gemini
+    if 'candidates' in response_data and len(response_data['candidates']) > 0:
+        try:
+            gemini_output = response_data['candidates'][0]['content']['parts'][0]['text'].strip()
+
+            # If Gemini wrapped the JSON in markdown code blocks, remove them.
+            if "```json" in gemini_output:
+                gemini_output = gemini_output.split("```json")[1].split("```")[0].strip()
+            elif "```" in gemini_output:
+                gemini_output = gemini_output.split("```")[1].split("```")[0].strip()
+
+            # Parse JSON. If it fails, we handle the exception and return [].
+            relevant_articles = json.loads(gemini_output)
+
+            # relevant_articles should be a list of dicts if Gemini followed instructions.
+            if not isinstance(relevant_articles, list):
+                print("Gemini did not return a JSON array. Returning empty.")
+                return []
+            
+            # Optionally, you can cross-reference each returned article with your original DB
+            # to retrieve or confirm the 'id' or other fields. For now, we assume Gemini included them.
+            return relevant_articles
+        except json.JSONDecodeError as e:
+            print("Error parsing JSON from Gemini:", e)
+            return []
+    else:
+        print("No valid candidates from Gemini. Returning empty.")
+        return []
+
+
+def get_pre_summarized_articles():
+    """
+    Retrieve articles with summaries from the database.
+    
+    Returns:
+        list: A list of article dictionaries with title, summary, URL, and topics.
+    """
+    try:
+        # Query the articles table for all articles with summaries
+        articles_response = supabase.table('articles').select('id, title, url, summary, topics, created_at').execute()
+        
+        if not articles_response.data:
+            print("No articles found in database")
+            return []
+            
+        # Format the articles
+        articles = []
+        for article in articles_response.data:
+            if article.get('summary'):  # Only include articles with summaries
+                articles.append({
+                    'id': article.get('id', ''),
+                    'title': article.get('title', 'Untitled'),
+                    'summary': article.get('summary', ''),
+                    'url': article.get('url', ''),
+                    'topics': article.get('topics', []),
+                    'created_at': article.get('created_at')
+                })
+        
+        # Sort by creation date, newest first
+        articles.sort(key=lambda a: a.get('created_at', ''), reverse=True)
+        
+        return articles
+    except Exception as e:
+        print(f"Error retrieving pre-summarized articles: {str(e)}")
+        return []
+
+@app.route('/api/check_supabase', methods=['GET'])
+def check_supabase():
+    """
+    Debug endpoint to check Supabase connection and query the articles table.
+    """
+    try:
+        # Check connection by querying the articles table
+        response = supabase.table('articles').select('*').limit(10).execute()
+        
+        # Print the response for debugging
+        print(f"Supabase query response: {response}")
+        
+        # Get the Supabase URL and key (with key partially masked)
+        supabase_url = os.environ.get('SUPABASE_URL', 'Not set')
+        supabase_key = os.environ.get('SUPABASE_KEY', 'Not set')
+        if supabase_key and len(supabase_key) > 8:
+            masked_key = supabase_key[:4] + '*' * (len(supabase_key) - 8) + supabase_key[-4:]
+        else:
+            masked_key = 'Invalid key'
+        
+        # Return connection info and query results
+        return jsonify({
+            'connection': {
+                'url': supabase_url,
+                'key': masked_key
+            },
+            'articles_count': len(response.data) if hasattr(response, 'data') else 0,
+            'articles': response.data if hasattr(response, 'data') else []
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

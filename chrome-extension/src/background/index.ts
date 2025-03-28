@@ -380,6 +380,8 @@ chrome.runtime.onMessage.addListener(
                 sendResponse({ error: chrome.runtime.lastError.message || 'Unknown error' });
               } else if (results && results[0]?.result) {
                 console.log('Content extracted successfully:', results[0].result);
+                console.log('Extracted content length:', results[0].result.content.length);
+                console.log('Extracted title:', results[0].result.title);
                 sendResponse({
                   content: results[0].result.content,
                   title: results[0].result.title,
