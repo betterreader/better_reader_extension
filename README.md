@@ -4,7 +4,8 @@
 
 BetterReader supports both online usage (via browser extension stores) and local usage by allowing users to configure their own LLM API keys.
 
-> [!IMPORTANT] > **BetterReader is currently in early development.**  
+> [!IMPORTANT]
+> **BetterReader is currently in early development.**  
 > It is not yet available on browser extension stores. However, you can set up and run the extension locally using this repository. It currently supports Chrome-based browsers.
 
 ## Features
@@ -27,7 +28,6 @@ Why choose BetterReader over other AI reading assistants?
   BetterReader combines summarization, chat, annotation, quiz generation, and research discovery into a single seamless interface—no need to juggle multiple extensions or apps.
 - **🌍 Open Source:**  
   Transparent, customizable, and community-driven. BetterReader is open-source under the Apache 2.0 license, so you can modify, contribute, or self-host it however you like.
-
 - **💻 Run Locally:**  
   Don't want to rely on third-party APIs or share your data? BetterReader allows you to bring your own API keys (e.g., Google Gemini) and run everything locally for full control over privacy and costs.
 
