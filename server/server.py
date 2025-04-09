@@ -1270,7 +1270,7 @@ def chat():
     Article Title: {article_title}
     
     Article Content: 
-    {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+    {article_content[:50000]}  # Limiting to 50000 chars to avoid token limits
     
     User Question: {message}
     
@@ -1324,7 +1324,7 @@ def chat():
                 Article Title: {article_title}
                 
                 Article Content: 
-                {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+                {article_content[:50000]}  # Limiting to 50000 chars to avoid token limits
                 
                 Quiz Context:
                 {quiz_context}
@@ -1341,7 +1341,7 @@ def chat():
                 Article Title: {article_title}
                 
                 Article Content: 
-                {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+                {article_content[:50000]}  # Limiting to 50000 chars to avoid token limits
                 
                 User Message: {message}
                 
@@ -1360,7 +1360,7 @@ def chat():
                 Article Title: {article_title}
                 
                 Article Content: 
-                {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+                {article_content[:50000]}  # Limiting to 50000 chars to avoid token limits
                 
                 User Message: {message}
                 
@@ -1423,7 +1423,7 @@ def analyze():
     Article Title: {article_title}
     
     Article Content: 
-    {article_content[:4000]}  # Limiting to 4000 chars to avoid token limits
+    {article_content[:50000]}  # Limiting to 50000 chars to avoid token limits
     
     Please analyze this article and provide the following:
     1. A concise summary (3-5 sentences)
@@ -1779,7 +1779,7 @@ def generate_summary():
         {' '.join(prompt_parts)}
         
         Article Content:
-        {article_content[:4000]}
+        {article_content[:50000]}
         
         Format your response as a JSON object with the following possible fields:
         {{
@@ -2351,7 +2351,7 @@ def generate_quiz():
             You are an educational assistant that creates tailored quiz questions to help users test their understanding of articles they're reading.
 
             ARTICLE CONTENT:
-            {article_content[:4000]}
+            {article_content[:50000]}
 
             USER REQUEST:
             {custom_prompt}
@@ -2405,7 +2405,7 @@ def generate_quiz():
             You are an educational assistant that creates tailored quiz questions to help users test their understanding of articles they're reading.
 
             ARTICLE CONTENT:
-            {article_content[:4000]}
+            {article_content[:50000]}
 
             USER REQUEST:
             Generate quiz questions about the main concepts and key points from this article.
@@ -2548,7 +2548,7 @@ def teacher_chat():
 Article Title: {article_title}
 
 Article Content (excerpt):
-{article_content[:4000]}
+{article_content[:50000]}
 
 Previous Conversation:
 {chr(10).join([f"{msg['role']}: {msg['content']}" for msg in conversation_history[-5:]])}
